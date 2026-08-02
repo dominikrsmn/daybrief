@@ -10,6 +10,14 @@ describe('AppController (e2e)', () => {
   const createTranscription = jest.fn().mockResolvedValue({
     text: 'Transcribed audio',
   });
+  const briefing = {
+    text: '# Morning briefing\n\n## Priority focus\n\n- Prepare the report.',
+    wakeupTime: '07:00',
+    uncertainties: ['The report deadline was not stated.'],
+  };
+  const createBriefing = jest.fn().mockResolvedValue({
+    output_parsed: briefing,
+  });
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -21,6 +29,9 @@ describe('AppController (e2e)', () => {
           transcriptions: {
             create: createTranscription,
           },
+        },
+        responses: {
+          parse: createBriefing,
         },
       })
       .compile();
@@ -44,7 +55,7 @@ describe('AppController (e2e)', () => {
         contentType: 'audio/mpeg',
       })
       .expect(201)
-      .expect('Transcribed audio');
+      .expect(briefing);
   });
 
   it('/audio (POST) rejects requests without an audio file', () => {

@@ -7,6 +7,8 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Briefing } from '../briefing/briefing.schema';
+import { BriefingService } from '../briefing/briefing.service';
 import type { UploadedAudioFile } from './audio-file.interface';
 import { AudioService } from './audio.service';
 
@@ -14,7 +16,10 @@ const MAX_AUDIO_FILE_SIZE = 25 * 1024 * 1024;
 
 @Controller('audio')
 export class AudioController {
-  constructor(private readonly audioService: AudioService) {}
+  constructor(
+    private readonly audioService: AudioService,
+    private readonly briefingService: BriefingService,
+  ) {}
 
   @Post()
   @UseInterceptors(
@@ -25,7 +30,9 @@ export class AudioController {
       },
     }),
   )
-  transcribe(@UploadedFile() file?: UploadedAudioFile): Promise<string> {
+  async transcribe(
+    @UploadedFile() file?: UploadedAudioFile,
+  ): Promise<Briefing> {
     if (!file) {
       throw new BadRequestException(
         'An audio file is required in the "audio" multipart field.',
@@ -38,6 +45,8 @@ export class AudioController {
       );
     }
 
-    return this.audioService.transcribe(file);
+    const transcription = await this.audioService.transcribe(file);
+
+    return this.briefingService.createBriefing(transcription);
   }
 }

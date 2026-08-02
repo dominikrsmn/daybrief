@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { openAIProvider } from '../openai/openai.provider';
+import { BriefingModule } from '../briefing/briefing.module';
 import { AudioController } from './audio.controller';
 import { AudioService } from './audio.service';
 
 @Module({
+  imports: [BriefingModule],
   controllers: [AudioController],
-  providers: [AudioService, openAIProvider],
+  providers: [AudioService],
 })
 export class AudioModule {}
