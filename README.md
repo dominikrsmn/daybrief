@@ -59,16 +59,74 @@ $ pnpm run test:cov
 
 ## Deployment
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Coolify (Dockerfile)
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Create a new application in Coolify, connect this repository, and select
+**Dockerfile** as the build pack. Keep the Dockerfile location as `/Dockerfile`
+and set the exposed port to `3000`.
+
+Add these environment variables in Coolify:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+NODE_ENV=production
+PORT=3000
+OPENAI_API_KEY=your-api-key
+OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
+OPENAI_BRIEFING_MODEL=gpt-5.6
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=your-verify-token
+WHATSAPP_APP_SECRET=your-app-secret
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Do not commit secrets or pass them as Docker build arguments. Coolify injects the
+variables at runtime. The container runs as an unprivileged user and exposes
+`GET /health` for health checks. Configure Coolify's health-check path as
+`/health`; the Docker image also includes its own health check.
+
+To build and test the production image locally:
+
+```bash
+docker build -t daybrief .
+docker run --rm -p 3000:3000 --env-file .env daybrief
+curl http://localhost:3000/health
+```
+
+### WhatsApp Cloud API webhook
+
+The application accepts Meta's verification request and signed event deliveries
+at this callback URL:
+
+```text
+https://YOUR-COOLIFY-DOMAIN/webhooks/whatsapp
+```
+
+In **Meta App Dashboard → WhatsApp → Configuration → Webhook**:
+
+1. Set **Callback URL** to the URL above.
+2. Set **Verify token** to the exact value configured as
+   `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in Coolify.
+3. Verify and save the callback.
+4. Subscribe the WhatsApp Business Account to the `messages` webhook field.
+
+Set `WHATSAPP_APP_SECRET` in Coolify to the app secret from **App settings →
+Basic**. Meta signs event deliveries with this secret; unsigned or incorrectly
+signed requests are rejected. Redeploy after changing Coolify environment
+variables.
+
+When a user sends a voice message to the connected WhatsApp Cloud API number,
+the app responds to Meta immediately and writes a structured
+`whatsapp.audio.received` event to the application logs. The event contains the
+message ID and media ID needed for the next media-download/transcription step.
+
+You can verify the callback challenge after deployment:
+
+```bash
+curl --get "https://YOUR-COOLIFY-DOMAIN/webhooks/whatsapp" \
+  --data-urlencode "hub.mode=subscribe" \
+  --data-urlencode "hub.verify_token=YOUR_VERIFY_TOKEN" \
+  --data-urlencode "hub.challenge=daybrief-test"
+```
+
+The response must be `daybrief-test`.
 
 ## Resources
 

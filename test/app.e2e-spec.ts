@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { OPENAI_CLIENT } from '../src/openai/openai.provider';
+import { createHmac } from 'node:crypto';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -21,6 +22,7 @@ describe('AppController (e2e)', () => {
 
   beforeEach(async () => {
     process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = 'test-verify-token';
+    process.env.WHATSAPP_APP_SECRET = 'test-app-secret';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -38,7 +40,7 @@ describe('AppController (e2e)', () => {
       })
       .compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({ rawBody: true });
     await app.init();
   });
 
@@ -54,6 +56,16 @@ describe('AppController (e2e)', () => {
       .get('/health')
       .expect(200)
       .expect({ status: 'ok' });
+  });
+
+  it('/privacy (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/privacy')
+      .expect('Content-Type', /text\/html/)
+      .expect(200)
+      .expect((response: { text: string }) => {
+        expect(response.text).toContain('Daybrief Privacy Policy');
+      });
   });
 
   it('/audio (POST) accepts a multipart audio file', () => {
@@ -115,42 +127,57 @@ describe('AppController (e2e)', () => {
   });
 
   it('/webhooks/whatsapp (POST) accepts an incoming voice message', () => {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                metadata: { phone_number_id: 'phone-number-id' },
+                messages: [
+                  {
+                    from: '4917648095385',
+                    id: 'message-id',
+                    timestamp: '1785686400',
+                    type: 'audio',
+                    audio: {
+                      id: 'media-id',
+                      mime_type: 'audio/ogg; codecs=opus',
+                      voice: true,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const signature = `sha256=${createHmac('sha256', 'test-app-secret')
+      .update(JSON.stringify(payload))
+      .digest('hex')}`;
+
     return request(app.getHttpServer())
       .post('/webhooks/whatsapp')
-      .send({
-        object: 'whatsapp_business_account',
-        entry: [
-          {
-            changes: [
-              {
-                field: 'messages',
-                value: {
-                  metadata: { phone_number_id: 'phone-number-id' },
-                  messages: [
-                    {
-                      from: '4917648095385',
-                      id: 'message-id',
-                      timestamp: '1785686400',
-                      type: 'audio',
-                      audio: {
-                        id: 'media-id',
-                        mime_type: 'audio/ogg; codecs=opus',
-                        voice: true,
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-          },
-        ],
-      })
+      .set('x-hub-signature-256', signature)
+      .send(payload)
       .expect(200)
       .expect({ received: true });
+  });
+
+  it('/webhooks/whatsapp (POST) rejects an invalid signature', () => {
+    return request(app.getHttpServer())
+      .post('/webhooks/whatsapp')
+      .set('x-hub-signature-256', 'sha256=invalid')
+      .send({ object: 'whatsapp_business_account', entry: [] })
+      .expect(401);
   });
 
   afterEach(async () => {
     await app.close();
     delete process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+    delete process.env.WHATSAPP_APP_SECRET;
   });
 });

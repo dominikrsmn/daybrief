@@ -28,12 +28,16 @@ export class WhatsAppService {
     return this.safeEqual(token, this.config.verifyToken);
   }
 
-  isValidSignature(rawBody: Buffer | undefined, signature?: string): boolean {
-    if (this.config.appSecret.length === 0) {
-      return true;
-    }
+  isWebhookSignatureConfigured(): boolean {
+    return this.config.appSecret.length > 0;
+  }
 
-    if (!rawBody || !signature?.startsWith('sha256=')) {
+  isValidSignature(rawBody: Buffer | undefined, signature?: string): boolean {
+    if (
+      !this.isWebhookSignatureConfigured() ||
+      !rawBody ||
+      !signature?.startsWith('sha256=')
+    ) {
       return false;
     }
 

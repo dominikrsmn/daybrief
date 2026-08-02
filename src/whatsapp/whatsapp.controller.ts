@@ -51,6 +51,12 @@ export class WhatsAppController {
     @Headers('x-hub-signature-256') signature: string | undefined,
     @Body() payload: WhatsAppWebhookPayload,
   ): { received: true } {
+    if (!this.whatsappService.isWebhookSignatureConfigured()) {
+      throw new ServiceUnavailableException(
+        'WHATSAPP_APP_SECRET is not configured.',
+      );
+    }
+
     if (!this.whatsappService.isValidSignature(request.rawBody, signature)) {
       throw new UnauthorizedException('Invalid webhook signature.');
     }

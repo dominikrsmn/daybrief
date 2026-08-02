@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Header } from '@nestjs/common';
 import { AppService } from './app.service';
 
 @Controller()
@@ -13,5 +13,50 @@ export class AppController {
   @Get('health')
   getHealth(): { status: 'ok' } {
     return { status: 'ok' };
+  }
+
+  @Get('privacy')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  getPrivacyPolicy(): string {
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daybrief Privacy Policy</title>
+    <style>
+      body { color: #1f2937; font: 16px/1.6 system-ui, sans-serif; margin: 0 auto; max-width: 760px; padding: 48px 24px; }
+      h1, h2 { color: #111827; line-height: 1.25; }
+      h1 { margin-bottom: 0; }
+      .updated { color: #6b7280; margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Daybrief Privacy Policy</h1>
+    <p class="updated">Last updated: August 2, 2026</p>
+    <p>Daybrief turns voice messages sent to its connected WhatsApp Business number into personal briefings.</p>
+
+    <h2>Data we process</h2>
+    <p>When you send a voice message, Daybrief receives your WhatsApp identifier, message and media identifiers, message timestamp, audio format metadata, and the voice recording itself.</p>
+
+    <h2>How we use data</h2>
+    <p>We use this data only to receive the message, transcribe the recording, create the requested briefing, operate the service, prevent abuse, and diagnose failures.</p>
+
+    <h2>Service providers</h2>
+    <p>Meta and WhatsApp deliver messages to Daybrief. OpenAI processes voice recordings and derived text to provide transcription and briefing generation. Our hosting infrastructure processes requests and operational logs.</p>
+
+    <h2>Storage and retention</h2>
+    <p>Daybrief currently does not intentionally persist voice recordings, webhook payloads, or generated briefings in an application database. Operational logs may contain message and media identifiers and are retained according to the hosting provider's log-retention settings. Service providers may retain data under their own terms and policies.</p>
+
+    <h2>Security</h2>
+    <p>Webhook requests are encrypted in transit and authenticated using Meta's request signature. Access to production credentials is restricted to the service environment.</p>
+
+    <h2>Your choices and deletion requests</h2>
+    <p>You can stop using Daybrief at any time. To request access to or deletion of data associated with your WhatsApp account, contact the operator through the same WhatsApp Business channel you used for Daybrief and include that the request concerns Daybrief privacy.</p>
+
+    <h2>Changes</h2>
+    <p>We may update this policy as the service changes. The date at the top identifies the latest version.</p>
+  </body>
+</html>`;
   }
 }
