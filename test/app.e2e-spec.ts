@@ -2,8 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
-import { OPENAI_CLIENT } from './../src/openai/openai.provider';
+import { AppModule } from '../src/app.module';
+import { OPENAI_CLIENT } from '../src/openai/openai.provider';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -20,6 +20,8 @@ describe('AppController (e2e)', () => {
   });
 
   beforeEach(async () => {
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = 'test-verify-token';
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
@@ -82,7 +84,66 @@ describe('AppController (e2e)', () => {
       .expect(415);
   });
 
+  it('/webhooks/whatsapp (GET) completes Meta webhook verification', () => {
+    return request(app.getHttpServer())
+      .get('/webhooks/whatsapp')
+      .query({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': 'test-verify-token',
+        'hub.challenge': 'challenge-123',
+      })
+      .expect(200)
+      .expect('challenge-123');
+  });
+
+  it('/webhooks/whatsapp (GET) rejects an invalid verify token', () => {
+    return request(app.getHttpServer())
+      .get('/webhooks/whatsapp')
+      .query({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': 'wrong-token',
+        'hub.challenge': 'challenge-123',
+      })
+      .expect(403);
+  });
+
+  it('/webhooks/whatsapp (POST) accepts an incoming voice message', () => {
+    return request(app.getHttpServer())
+      .post('/webhooks/whatsapp')
+      .send({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                field: 'messages',
+                value: {
+                  metadata: { phone_number_id: 'phone-number-id' },
+                  messages: [
+                    {
+                      from: '4917648095385',
+                      id: 'message-id',
+                      timestamp: '1785686400',
+                      type: 'audio',
+                      audio: {
+                        id: 'media-id',
+                        mime_type: 'audio/ogg; codecs=opus',
+                        voice: true,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      })
+      .expect(200)
+      .expect({ received: true });
+  });
+
   afterEach(async () => {
     await app.close();
+    delete process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
   });
 });
