@@ -49,6 +49,13 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('/health (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect({ status: 'ok' });
+  });
+
   it('/audio (POST) accepts a multipart audio file', () => {
     return request(app.getHttpServer())
       .post('/audio')
