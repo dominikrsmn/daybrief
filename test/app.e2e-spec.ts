@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import type { Briefing } from '../src/briefing/briefing.schema';
 import { OPENAI_CLIENT } from '../src/openai/openai.provider';
 import { createHmac } from 'node:crypto';
 import { configureStaticPages } from '../src/static-pages';
@@ -12,10 +13,23 @@ describe('AppController (e2e)', () => {
     text: 'Transcribed audio',
   });
   const briefing = {
-    text: '# Morning briefing\n\n## Priority focus\n\n- Prepare the report.',
-    wakeupTime: '07:00',
-    uncertainties: ['The report deadline was not stated.'],
-  };
+    language: 'en',
+    wakeupTime: '7:00',
+    commitments: [],
+    tasks: [
+      {
+        title: 'Prepare the report',
+        deadline: null,
+        priority: 'normal',
+        priorityReason: null,
+        nextStep: null,
+        dependency: null,
+      },
+    ],
+    reminders: [],
+    context: [],
+    openQuestions: [],
+  } satisfies Briefing;
   const createBriefing = jest.fn().mockResolvedValue({
     output_parsed: briefing,
   });
