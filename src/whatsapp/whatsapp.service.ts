@@ -25,6 +25,20 @@ interface WhatsAppSendMessageResponse {
   messages?: Array<{ id?: string }>;
 }
 
+interface WhatsAppApiErrorResponse {
+  error?: {
+    code?: number;
+    error_data?: {
+      details?: string;
+      messaging_product?: string;
+    };
+    error_subcode?: number;
+    fbtrace_id?: string;
+    message?: string;
+    type?: string;
+  };
+}
+
 interface WhatsAppMediaMetadataResponse {
   file_size?: number;
   id?: string;
@@ -243,10 +257,13 @@ export class WhatsAppService {
     }
 
     if (!response.ok) {
+      const providerError = await this.parseWhatsAppApiError(response);
+
       this.logger.error(
         JSON.stringify({
           event: 'whatsapp.reply.rejected',
           messageId: message.id,
+          providerError,
           status: response.status,
         }),
       );
@@ -475,6 +492,16 @@ export class WhatsAppService {
       return (await response.json()) as T;
     } catch {
       throw new BadGatewayException(errorMessage);
+    }
+  }
+
+  private async parseWhatsAppApiError(
+    response: Response,
+  ): Promise<WhatsAppApiErrorResponse | { unavailable: true }> {
+    try {
+      return (await response.json()) as WhatsAppApiErrorResponse;
+    } catch {
+      return { unavailable: true };
     }
   }
 
