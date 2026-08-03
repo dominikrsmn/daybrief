@@ -25,11 +25,18 @@ interface WhatsAppWebhookMessage {
   type?: string;
 }
 
+interface WhatsAppWebhookStatus {
+  id?: string;
+  status?: string;
+  timestamp?: string;
+}
+
 interface WhatsAppWebhookValue {
   messages?: WhatsAppWebhookMessage[];
   metadata?: {
     phone_number_id?: string;
   };
+  statuses?: WhatsAppWebhookStatus[];
 }
 
 interface WhatsAppWebhookChange {

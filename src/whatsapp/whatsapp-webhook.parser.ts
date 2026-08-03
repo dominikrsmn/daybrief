@@ -3,22 +3,51 @@ import type {
   WhatsAppWebhookPayload,
 } from './whatsapp-webhook.types';
 
+export interface WhatsAppDeliveryStatus {
+  messageId: string;
+  status: 'delivered' | 'read';
+  timestamp?: string;
+}
+
+export interface UnknownWhatsAppWebhookEvent {
+  field?: string;
+  messageType?: string;
+  status?: string;
+}
+
+export interface ClassifiedWhatsAppWebhook {
+  audioMessages: WhatsAppAudioMessage[];
+  deliveryStatuses: WhatsAppDeliveryStatus[];
+  unknownEvents: UnknownWhatsAppWebhookEvent[];
+}
+
 /**
- * Extracts complete audio-message references from a WhatsApp webhook payload.
- * Incomplete entries are ignored because they cannot complete the reply flow.
+ * Classifies webhook content using Meta's explicit message type and status
+ * fields. Unsupported or incomplete content remains observable without
+ * logging the full payload or personal recipient information.
  */
-export function extractWhatsAppAudioMessages(
+export function classifyWhatsAppWebhook(
   payload: WhatsAppWebhookPayload,
-): WhatsAppAudioMessage[] {
+): ClassifiedWhatsAppWebhook {
+  const classified: ClassifiedWhatsAppWebhook = {
+    audioMessages: [],
+    deliveryStatuses: [],
+    unknownEvents: [],
+  };
+
   if (payload.object !== 'whatsapp_business_account') {
-    return [];
+    classified.unknownEvents.push({});
+    return classified;
   }
 
-  const audioMessages: WhatsAppAudioMessage[] = [];
+  let foundChange = false;
 
   for (const entry of payload.entry ?? []) {
     for (const change of entry.changes ?? []) {
+      foundChange = true;
+
       if (change.field !== 'messages') {
+        classified.unknownEvents.push({ field: change.field });
         continue;
       }
 
@@ -32,10 +61,14 @@ export function extractWhatsAppAudioMessages(
           !message.id ||
           !phoneNumberId
         ) {
+          classified.unknownEvents.push({
+            field: change.field,
+            messageType: message.type,
+          });
           continue;
         }
 
-        audioMessages.push({
+        classified.audioMessages.push({
           from: message.from,
           id: message.id,
           mediaId: message.audio.id,
@@ -45,8 +78,39 @@ export function extractWhatsAppAudioMessages(
           voice: message.audio.voice === true,
         });
       }
+
+      for (const status of change.value?.statuses ?? []) {
+        if (
+          status.id &&
+          (status.status === 'delivered' || status.status === 'read')
+        ) {
+          classified.deliveryStatuses.push({
+            messageId: status.id,
+            status: status.status,
+            timestamp: status.timestamp,
+          });
+          continue;
+        }
+
+        classified.unknownEvents.push({
+          field: change.field,
+          status: status.status,
+        });
+      }
+
+      const value = change.value;
+      if (
+        (value?.messages?.length ?? 0) === 0 &&
+        (value?.statuses?.length ?? 0) === 0
+      ) {
+        classified.unknownEvents.push({ field: change.field });
+      }
     }
   }
 
-  return audioMessages;
+  if (!foundChange) {
+    classified.unknownEvents.push({});
+  }
+
+  return classified;
 }

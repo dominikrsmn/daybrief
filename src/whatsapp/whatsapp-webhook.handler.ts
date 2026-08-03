@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { VoiceBriefingProcessor } from './voice-briefing.processor';
-import { extractWhatsAppAudioMessages } from './whatsapp-webhook.parser';
+import { classifyWhatsAppWebhook } from './whatsapp-webhook.parser';
 import type {
   WhatsAppAudioMessage,
   WhatsAppWebhookPayload,
@@ -26,15 +26,29 @@ export class WhatsAppWebhookHandler {
   handle(payload: WhatsAppWebhookPayload): void {
     this.removeExpiredProcessedMessageIds();
 
-    const messages = extractWhatsAppAudioMessages(payload);
-    this.logger.log(
-      JSON.stringify({
-        event: 'whatsapp.webhook.audio_messages_extracted',
-        count: messages.length,
-      }),
-    );
+    const { audioMessages, deliveryStatuses, unknownEvents } =
+      classifyWhatsAppWebhook(payload);
 
-    for (const message of messages) {
+    for (const deliveryStatus of deliveryStatuses) {
+      this.logger.log(
+        JSON.stringify({
+          event: `whatsapp.message.${deliveryStatus.status}`,
+          messageId: deliveryStatus.messageId,
+          timestamp: deliveryStatus.timestamp,
+        }),
+      );
+    }
+
+    for (const unknownEvent of unknownEvents) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'whatsapp.webhook.unknown',
+          ...unknownEvent,
+        }),
+      );
+    }
+
+    for (const message of audioMessages) {
       if (this.isDuplicate(message.id)) {
         this.logger.log(
           JSON.stringify({
