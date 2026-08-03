@@ -53,6 +53,9 @@ export const OpenQuestionSchema = z.object({
  * delivery channel.
  */
 export const BriefingSchema = z.object({
+  language: z
+    .enum(['en', 'de'])
+    .describe('The dominant language of the transcript and briefing content.'),
   wakeupTime: OptionalTimingSchema.describe(
     'The next-day wake-up time stated by the user, preserving their wording, or null.',
   ),
