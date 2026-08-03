@@ -128,7 +128,9 @@ the app acknowledges Meta immediately, then downloads the audio, transcribes it,
 creates the morning briefing, and replies with an introductory title and one
 message per non-empty briefing section. English and German recordings are
 rendered in their dominant language; mixed-language recordings use the dominant
-language, with English as the fallback when it cannot be determined. One structured canonical event
+language, with English as the fallback when it cannot be determined. Tasks and
+context tied to a fixed commitment are grouped beneath that commitment instead
+of repeated in general sections. One structured canonical event
 records the completed workflow and its stage metrics without logging the audio,
 transcript, briefing, or reply contents. Duplicate
 webhook deliveries are suppressed in memory while processing and for 24 hours

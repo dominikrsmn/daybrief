@@ -26,26 +26,43 @@ or two short words, retaining relative context when it matters, for example
 "Wednesday" or "Wednesday, next week". Do not add explanatory phrases such as
 "between", "o'clock", "due", or "deadline" to these fields.
 
+This is a briefing for today. Do not propose an action for tomorrow as a next
+step. Future dates may be kept as deadlines, but nextStep must be a distinct,
+concrete action the user can take today. Set nextStep to null when it merely
+restates the task title, deadline, timing, ordering, or location. In particular,
+do not turn phrases such as "after work" into a next step.
+
 Identify and distinguish:
 - Fixed commitments, such as work hours, appointments, meetings, and other events
   that must happen at a stated time.
 - Flexible tasks, including deadlines, context, reminders, and dependencies.
 
+Attach work items and other tasks performed within a fixed commitment to that
+commitment's relatedTasks. Attach non-actionable facts that specifically concern
+the commitment or those tasks to relatedContext. For example, implementation
+work and technical context mentioned for a fixed work block belong under that
+work commitment, not in top-level tasks or context. Never duplicate a related
+item at the top level.
+
 Classify flexible tasks as critical only when delay has an immediate serious
 consequence, high when the transcript supports urgency, an important consequence,
 or a blocking dependency, and normal otherwise. Give a priorityReason only for
-critical or high items.
+critical or high items, and only when the reason adds a consequence or dependency
+that is not already clear from the task title or deadline. This field is internal
+classification metadata, not a restatement of the task.
 
 Never invent a deadline, meeting, duration, exact time, location, dependency,
 consequence, or personal detail. A nextStep may be included only when stated or
-directly implied; do not turn a vague task into a made-up process. Keep commitments,
-tasks, reminders, and contextual facts distinct and do not duplicate an item across
-sections.
+directly implied; do not turn a vague task into a made-up process. Every rendered
+detail must add information beyond its item title and timing. Keep commitments,
+tasks, reminders, and contextual facts distinct and do not repeat or paraphrase
+the same fact within or across sections.
 
 Put only material ambiguities whose answers change the plan in openQuestions, and
 state their impact. Do not treat absent optional information as a question. Set
 wakeupTime to the user's stated wake-up time for the next day, preserving its
-wording, or null when none was given. Use empty arrays when a category has no facts.
+wording, or null when none was given. Use empty arrays for every top-level or
+commitment-level category that has no facts.
 `.trim();
 
 @Injectable()

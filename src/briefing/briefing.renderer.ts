@@ -113,8 +113,14 @@ function renderCommitments(
         : null,
       commitment.context,
     ];
+    const relatedItems = [
+      ...sortTasks(commitment.relatedTasks).map(
+        (task) => `• ${renderTask(task, copy)}`,
+      ),
+      ...commitment.relatedContext.map((item) => `• ${item}`),
+    ];
 
-    return withDetails(title, details);
+    return [withDetails(title, details), ...relatedItems].join('\n');
   });
 }
 
@@ -122,26 +128,37 @@ function renderTasks(
   tasks: Briefing['tasks'],
   copy: RendererCopy,
 ): string | null {
-  const sortedTasks = tasks
+  return renderSection(copy.tasks, sortTasks(tasks), (task) =>
+    renderTask(task, copy),
+  );
+}
+
+function sortTasks(tasks: readonly Task[]): readonly Task[] {
+  return tasks
     .map((task, originalIndex) => ({ originalIndex, task }))
     .sort(
       (left, right) =>
         PRIORITY_ORDER[left.task.priority] -
           PRIORITY_ORDER[right.task.priority] ||
         left.originalIndex - right.originalIndex,
-    );
+    )
+    .map(({ task }) => task);
+}
 
-  return renderSection(copy.tasks, sortedTasks, ({ task }) => {
-    const deadline = task.deadline ? ` (${task.deadline})` : '';
-    const title = `${PRIORITY_EMOJI[task.priority]}  ${task.title}${deadline}`;
-    const details = [
-      task.priorityReason,
-      task.nextStep ? `${copy.nextStepPrefix} ${task.nextStep}` : null,
-      task.dependency ? `${copy.dependencyPrefix} ${task.dependency}` : null,
-    ];
+function renderTask(task: Task, copy: RendererCopy): string {
+  const deadline = task.deadline ? ` (${task.deadline})` : '';
+  const title = `${PRIORITY_EMOJI[task.priority]}  ${task.title}${deadline}`;
+  const nextStep =
+    task.nextStep && !substantiallyRepeats(task.title, task.nextStep)
+      ? `${copy.nextStepPrefix} ${task.nextStep}`
+      : null;
+  const dependency =
+    task.dependency && !substantiallyRepeats(task.title, task.dependency)
+      ? `${copy.dependencyPrefix} ${task.dependency}`
+      : null;
+  const details = [nextStep, dependency];
 
-    return withDetails(title, details);
-  });
+  return withDetails(title, details);
 }
 
 function renderSection<T>(
@@ -178,4 +195,63 @@ function clean(value: string): string {
     .replace(/\s*–\s*/g, ' - ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const COMPARISON_STOP_WORDS = new Set([
+  'after',
+  'and',
+  'andere',
+  'another',
+  'appropriate',
+  'das',
+  'dem',
+  'den',
+  'der',
+  'die',
+  'eine',
+  'einen',
+  'einer',
+  'for',
+  'fur',
+  'geeignete',
+  'im',
+  'ins',
+  'morgen',
+  'nach',
+  'oder',
+  'other',
+  'the',
+  'tomorrow',
+  'und',
+]);
+
+/** Suppresses model phrasing that only rewords the task instead of advancing it. */
+function substantiallyRepeats(title: string, detail: string): boolean {
+  const titleTokens = comparableTokens(title);
+  const detailTokens = comparableTokens(detail);
+
+  if (titleTokens.size === 0 || detailTokens.size === 0) {
+    return false;
+  }
+
+  const sharedTokenCount = [...titleTokens].filter((token) =>
+    detailTokens.has(token),
+  ).length;
+
+  return (
+    sharedTokenCount / Math.min(titleTokens.size, detailTokens.size) >= 0.75
+  );
+}
+
+function comparableTokens(value: string): ReadonlySet<string> {
+  return new Set(
+    value
+      .normalize('NFKD')
+      .replace(/\p{M}+/gu, '')
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(
+        (token) => token.length >= 3 && !COMPARISON_STOP_WORDS.has(token),
+      ),
+  );
 }

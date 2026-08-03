@@ -72,14 +72,22 @@ export class VoiceBriefingProcessor {
 
     stageStartedAt = Date.now();
     const briefing = await this.briefingService.createBriefing(transcription);
+    const relatedTasks = briefing.commitments.reduce(
+      (total, commitment) => total + commitment.relatedTasks.length,
+      0,
+    );
+    const relatedContextItems = briefing.commitments.reduce(
+      (total, commitment) => total + commitment.relatedContext.length,
+      0,
+    );
     telemetry.briefing = {
       commitments: briefing.commitments.length,
-      context_items: briefing.context.length,
+      context_items: briefing.context.length + relatedContextItems,
       duration_ms: Date.now() - stageStartedAt,
       language: briefing.language,
       open_questions: briefing.openQuestions.length,
       reminders: briefing.reminders.length,
-      tasks: briefing.tasks.length,
+      tasks: briefing.tasks.length + relatedTasks,
     };
     const replies = renderWhatsAppBriefingMessages(briefing);
 
