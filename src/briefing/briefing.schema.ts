@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 const OptionalDetailSchema = z.string().min(1).max(240).nullable();
 const OptionalTimingSchema = z.string().min(1).max(80).nullable();
+const OptionalWakeupTimeSchema = z
+  .string()
+  .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
+  .nullable();
 
 export const TaskSchema = z.object({
   title: z
@@ -76,8 +80,8 @@ export const BriefingSchema = z.object({
   language: z
     .enum(['en', 'de'])
     .describe('The dominant language of the transcript and briefing content.'),
-  wakeupTime: OptionalTimingSchema.describe(
-    'The wake-up time stated by the user for the briefing day, preserving their wording, or null.',
+  wakeupTime: OptionalWakeupTimeSchema.describe(
+    'The wake-up time stated by the user for the briefing day, normalized to 24-hour HH:mm format, or null.',
   ),
   commitments: z
     .array(CommitmentSchema)

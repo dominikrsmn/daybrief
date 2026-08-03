@@ -77,6 +77,9 @@ Add these environment variables in Coolify:
 ```bash
 NODE_ENV=production
 PORT=3000
+DATABASE_URL=postgresql://user:password@postgres:5432/daybrief
+DEFAULT_BRIEFING_TIME=06:00
+DEFAULT_BRIEFING_TIME_ZONE=Europe/Berlin
 OPENAI_API_KEY=your-api-key
 OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
 OPENAI_BRIEFING_MODEL=gpt-5.6
@@ -125,8 +128,12 @@ prefer a system-user token rather than a temporary dashboard token. Set
 
 When a user sends a voice message to the connected WhatsApp Cloud API number,
 the app acknowledges Meta immediately, then downloads the audio, transcribes it,
-creates the morning briefing, and replies with an introductory title and one
-message per non-empty briefing section. English and German recordings are
+creates and persists the morning briefing. A PostgreSQL-backed scheduler polls
+every 30 seconds and sends the briefing at the user's stated wake-up time on the
+next local calendar day, or at `DEFAULT_BRIEFING_TIME` when no wake-up time was
+given. `DEFAULT_BRIEFING_TIME_ZONE` must be an IANA time zone and is used for all
+users until per-user time zones are introduced. The delivery contains an
+introductory title and one message per non-empty briefing section. English and German recordings are
 rendered in their dominant language; mixed-language recordings use the dominant
 language, with English as the fallback when it cannot be determined. Tasks and
 context tied to a fixed commitment are grouped beneath that commitment instead

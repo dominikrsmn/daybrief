@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
 import { AudioService } from '../audio/audio.service';
-import { renderWhatsAppBriefingMessages } from '../briefing/briefing.renderer';
 import { BriefingService } from '../briefing/briefing.service';
+import { briefingScheduleConfig } from '../scheduling/briefing-schedule.config';
+import { resolveBriefingSchedule } from '../scheduling/briefing-schedule';
+import { ScheduledBriefingRepository } from '../scheduling/scheduled-briefing.repository';
 import type { WhatsAppAudioMessage } from './whatsapp-webhook.types';
 import {
   WhatsAppService,
   type WhatsAppDownloadTelemetry,
-  type WhatsAppReplyTelemetry,
 } from './whatsapp.service';
 
 export interface VoiceBriefingTelemetry {
@@ -24,18 +26,15 @@ export interface VoiceBriefingTelemetry {
     reminders: number;
     tasks: number;
   };
-  reply?: {
+  scheduling?: {
     duration_ms: number;
-    message_count: number;
-    outbound_message_ids: string[];
-    total_length_chars: number;
+    source: 'default' | 'user';
   };
   transcription?: {
     character_count: number;
     duration_ms: number;
   };
   whatsapp_download?: WhatsAppDownloadTelemetry;
-  whatsapp_replies?: WhatsAppReplyTelemetry[];
 }
 
 @Injectable()
@@ -44,12 +43,15 @@ export class VoiceBriefingProcessor {
     private readonly whatsAppService: WhatsAppService,
     private readonly audioService: AudioService,
     private readonly briefingService: BriefingService,
+    private readonly scheduledBriefings: ScheduledBriefingRepository,
+    @Inject(briefingScheduleConfig.KEY)
+    private readonly scheduleConfig: ConfigType<typeof briefingScheduleConfig>,
   ) {}
 
   async process(
     message: WhatsAppAudioMessage,
     telemetry: VoiceBriefingTelemetry,
-  ): Promise<readonly string[]> {
+  ): Promise<{ briefingId: string; scheduledAt: string }> {
     let stageStartedAt = Date.now();
     const downloadTelemetry: WhatsAppDownloadTelemetry = {};
     telemetry.whatsapp_download = downloadTelemetry;
@@ -89,41 +91,28 @@ export class VoiceBriefingProcessor {
       reminders: briefing.reminders.length,
       tasks: briefing.tasks.length + relatedTasks,
     };
-    const replies = renderWhatsAppBriefingMessages(briefing);
-
     stageStartedAt = Date.now();
-    const replyTelemetry = replies.map((): WhatsAppReplyTelemetry => ({}));
-    telemetry.whatsapp_replies = replyTelemetry;
-    const outboundMessageIds: string[] = [];
-
-    // Awaiting each send preserves the briefing's section order in WhatsApp.
-    for (const [index, reply] of replies.entries()) {
-      const outboundMessageId =
-        index === 0
-          ? await this.whatsAppService.reply(
-              message,
-              reply,
-              replyTelemetry[index],
-            )
-          : await this.whatsAppService.send(
-              message,
-              reply,
-              replyTelemetry[index],
-            );
-
-      outboundMessageIds.push(outboundMessageId);
-    }
-
-    telemetry.reply = {
+    const schedule = resolveBriefingSchedule({
+      defaultTime: this.scheduleConfig.defaultTime,
+      providerTimestamp: message.timestamp,
+      timeZone: this.scheduleConfig.timeZone,
+      wakeupTime: briefing.wakeupTime,
+    });
+    const scheduledBriefing = await this.scheduledBriefings.schedule({
+      briefing,
+      inboundMessageId: message.id,
+      phoneNumberId: message.phoneNumberId,
+      recipient: message.from,
+      scheduledAt: schedule.scheduledAt,
+    });
+    telemetry.scheduling = {
       duration_ms: Date.now() - stageStartedAt,
-      message_count: replies.length,
-      outbound_message_ids: outboundMessageIds,
-      total_length_chars: replies.reduce(
-        (total, reply) => total + reply.length,
-        0,
-      ),
+      source: schedule.source,
     };
 
-    return outboundMessageIds;
+    return {
+      briefingId: scheduledBriefing.id,
+      scheduledAt: scheduledBriefing.scheduledAt,
+    };
   }
 }

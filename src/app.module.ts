@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AudioModule } from './audio/audio.module';
@@ -14,6 +15,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       isGlobal: true,
       load: [openAIConfig],
     }),
+    ScheduleModule.forRoot(),
     OpenAIModule,
     ObservabilityModule,
     AudioModule,

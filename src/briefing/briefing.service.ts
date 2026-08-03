@@ -72,9 +72,11 @@ the same fact within or across sections.
 
 Put only material ambiguities whose answers change the plan in openQuestions, and
 state their impact. Do not treat absent optional information as a question. Set
-wakeupTime to the user's stated wake-up time for the briefing day, preserving its
-wording, or null when none was given. Use empty arrays for every top-level or
-commitment-level category that has no facts.
+wakeupTime to the user's stated wake-up time for the briefing day, normalized to
+24-hour HH:mm notation (for example, 06:30 or 18:30), or null when none was
+given. Resolve ordinary language such as "half past six" or German "halb sieben"
+when its meaning is clear from the transcript. Use empty arrays for every
+top-level or commitment-level category that has no facts.
 `.trim();
 
 @Injectable()
