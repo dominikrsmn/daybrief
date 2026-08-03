@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AudioService } from '../audio/audio.service';
+import { renderWhatsAppBriefing } from '../briefing/briefing.renderer';
 import { BriefingService } from '../briefing/briefing.service';
 import type { WhatsAppAudioMessage } from './whatsapp-webhook.types';
 import { WhatsAppService } from './whatsapp.service';
@@ -16,7 +17,8 @@ export class VoiceBriefingProcessor {
     const audioFile = await this.whatsAppService.downloadAudio(message);
     const transcription = await this.audioService.transcribe(audioFile);
     const briefing = await this.briefingService.createBriefing(transcription);
+    const reply = renderWhatsAppBriefing(briefing);
 
-    return this.whatsAppService.reply(message, briefing.text);
+    return this.whatsAppService.reply(message, reply);
   }
 }
