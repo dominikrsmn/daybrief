@@ -4,9 +4,15 @@ const OptionalDetailSchema = z.string().min(1).max(240).nullable();
 const OptionalTimingSchema = z.string().min(1).max(80).nullable();
 
 export const TaskSchema = z.object({
-  title: z.string().min(1).max(160),
+  title: z
+    .string()
+    .min(1)
+    .max(160)
+    .describe(
+      'The task itself, without tomorrow/morgen or another suffix that only indicates the briefing day.',
+    ),
   deadline: OptionalTimingSchema.describe(
-    'The user-stated deadline as one or two compact words (for example, Wednesday or Wednesday, next week), or null.',
+    "A user-stated deadline beyond the briefing day, in one or two compact words (for example, Wednesday or Wednesday, next week), or null. The user's tomorrow/morgen is the briefing day and must produce null.",
   ),
   priority: z
     .enum(['critical', 'high', 'normal'])
@@ -15,7 +21,7 @@ export const TaskSchema = z.object({
     'An internal classification reason only when it adds a consequence or dependency not already stated by the title or deadline, or null.',
   ),
   nextStep: OptionalDetailSchema.describe(
-    'A distinct concrete action for today that materially advances the task without restating its title, timing, or deadline, or null.',
+    'A distinct concrete action for the briefing day that materially advances the task without restating its title, timing, or deadline, or null.',
   ),
   dependency: OptionalDetailSchema.describe(
     'A person, input, or preceding action this task depends on, or null.',
@@ -47,7 +53,9 @@ export const CommitmentSchema = z.object({
 
 export const ReminderSchema = z.object({
   text: z.string().min(1).max(200),
-  timing: OptionalTimingSchema,
+  timing: OptionalTimingSchema.describe(
+    'User-stated timing only when it adds information within or beyond the briefing day, or null. Do not use tomorrow/morgen merely to label the briefing day.',
+  ),
 });
 
 export const OpenQuestionSchema = z.object({
@@ -69,7 +77,7 @@ export const BriefingSchema = z.object({
     .enum(['en', 'de'])
     .describe('The dominant language of the transcript and briefing content.'),
   wakeupTime: OptionalTimingSchema.describe(
-    'The next-day wake-up time stated by the user, preserving their wording, or null.',
+    'The wake-up time stated by the user for the briefing day, preserving their wording, or null.',
   ),
   commitments: z
     .array(CommitmentSchema)
