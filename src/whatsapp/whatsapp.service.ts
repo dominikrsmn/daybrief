@@ -52,7 +52,9 @@ export class WhatsAppService {
   }
 
   handleWebhook(payload: WhatsAppWebhookPayload): void {
+    this.logger.log('received handleWebhook');
     for (const message of this.extractAudioMessages(payload)) {
+      this.logger.log('working on message');
       // Media download, transcription and reply orchestration will live here.
       this.logger.log(
         JSON.stringify({
@@ -70,6 +72,7 @@ export class WhatsAppService {
     payload: WhatsAppWebhookPayload,
   ): WhatsAppAudioMessage[] {
     if (payload.object !== 'whatsapp_business_account') {
+      this.logger.log("payload.object !== 'whatsapp_business_account'");
       return [];
     }
 
@@ -103,6 +106,7 @@ export class WhatsAppService {
         }
       }
     }
+    this.logger.log('got ' + audioMessages.length + ' audio messages');
 
     return audioMessages;
   }
