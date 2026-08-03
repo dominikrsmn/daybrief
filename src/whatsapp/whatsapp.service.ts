@@ -186,15 +186,33 @@ export class WhatsAppService {
     body: string,
     telemetry: WhatsAppReplyTelemetry = {},
   ): Promise<string> {
+    return this.sendText(message, body, telemetry, message.id);
+  }
+
+  /** Sends a plain-text WhatsApp message without linking it as a reply. */
+  async send(
+    message: WhatsAppMessageReference,
+    body: string,
+    telemetry: WhatsAppReplyTelemetry = {},
+  ): Promise<string> {
+    return this.sendText(message, body, telemetry);
+  }
+
+  private async sendText(
+    message: WhatsAppMessageReference,
+    body: string,
+    telemetry: WhatsAppReplyTelemetry,
+    replyToMessageId?: string,
+  ): Promise<string> {
     const normalizedBody = body.trim();
 
     if (normalizedBody.length === 0) {
-      throw new BadRequestException('A WhatsApp reply body is required.');
+      throw new BadRequestException('A WhatsApp message body is required.');
     }
 
     if (normalizedBody.length > 4_096) {
       throw new BadRequestException(
-        'A WhatsApp reply body cannot exceed 4096 characters.',
+        'A WhatsApp message body cannot exceed 4096 characters.',
       );
     }
 
@@ -218,7 +236,9 @@ export class WhatsAppService {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: message.from,
-          context: { message_id: message.id },
+          ...(replyToMessageId
+            ? { context: { message_id: replyToMessageId } }
+            : {}),
           type: 'text',
           text: {
             body: normalizedBody,
@@ -234,7 +254,7 @@ export class WhatsAppService {
 
     if (!response.ok) {
       await this.discardResponseBody(response);
-      throw new BadGatewayException('WhatsApp rejected the reply.');
+      throw new BadGatewayException('WhatsApp rejected the message.');
     }
 
     let result: WhatsAppSendMessageResponse;
@@ -243,7 +263,7 @@ export class WhatsAppService {
       result = (await response.json()) as WhatsAppSendMessageResponse;
     } catch {
       throw new BadGatewayException(
-        'WhatsApp returned an invalid reply response.',
+        'WhatsApp returned an invalid message response.',
       );
     }
     const replyMessageId = result.messages?.[0]?.id;

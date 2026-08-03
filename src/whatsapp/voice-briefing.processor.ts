@@ -98,9 +98,20 @@ export class VoiceBriefingProcessor {
 
     // Awaiting each send preserves the briefing's section order in WhatsApp.
     for (const [index, reply] of replies.entries()) {
-      outboundMessageIds.push(
-        await this.whatsAppService.reply(message, reply, replyTelemetry[index]),
-      );
+      const outboundMessageId =
+        index === 0
+          ? await this.whatsAppService.reply(
+              message,
+              reply,
+              replyTelemetry[index],
+            )
+          : await this.whatsAppService.send(
+              message,
+              reply,
+              replyTelemetry[index],
+            );
+
+      outboundMessageIds.push(outboundMessageId);
     }
 
     telemetry.reply = {
