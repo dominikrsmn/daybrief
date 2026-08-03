@@ -44,6 +44,13 @@ $ pnpm run start:dev
 $ pnpm run start:prod
 ```
 
+## Static pages
+
+HTML files in `public` are served from clean, extensionless root URLs. For
+example, `public/privacy.html` is available at `/privacy`, and adding
+`public/new_page.html` makes it available at `/new_page` immediately. Other
+public assets remain available by their full filename.
+
 ## Run tests
 
 ```bash

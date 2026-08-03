@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { OPENAI_CLIENT } from '../src/openai/openai.provider';
 import { createHmac } from 'node:crypto';
+import { configureStaticPages } from '../src/static-pages';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
   const createTranscription = jest.fn().mockResolvedValue({
     text: 'Transcribed audio',
   });
@@ -40,7 +40,10 @@ describe('AppController (e2e)', () => {
       })
       .compile();
 
-    app = moduleFixture.createNestApplication({ rawBody: true });
+    app = moduleFixture.createNestApplication<NestExpressApplication>({
+      rawBody: true,
+    });
+    configureStaticPages(app);
     await app.init();
   });
 
