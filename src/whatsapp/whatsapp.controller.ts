@@ -15,11 +15,15 @@ import {
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import type { WhatsAppWebhookPayload } from './whatsapp-webhook.types';
+import { WhatsAppWebhookHandler } from './whatsapp-webhook.handler';
 import { WhatsAppService } from './whatsapp.service';
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppController {
-  constructor(private readonly whatsappService: WhatsAppService) {}
+  constructor(
+    private readonly whatsappService: WhatsAppService,
+    private readonly webhookHandler: WhatsAppWebhookHandler,
+  ) {}
 
   @Get()
   verifyWebhook(
@@ -61,7 +65,7 @@ export class WhatsAppController {
       throw new UnauthorizedException('Invalid webhook signature.');
     }
 
-    this.whatsappService.handleWebhook(payload);
+    this.webhookHandler.handle(payload);
 
     return { received: true };
   }

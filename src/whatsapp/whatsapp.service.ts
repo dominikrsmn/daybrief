@@ -12,13 +12,10 @@ import {
   MAX_AUDIO_FILE_SIZE_BYTES,
   type UploadedAudioFile,
 } from '../audio/audio-file.interface';
-import { AudioService } from '../audio/audio.service';
-import { BriefingService } from '../briefing/briefing.service';
 import { whatsappConfig } from './whatsapp.config';
 import type {
   WhatsAppAudioMessage,
   WhatsAppMessageReference,
-  WhatsAppWebhookPayload,
 } from './whatsapp-webhook.types';
 
 interface WhatsAppSendMessageResponse {
@@ -59,19 +56,13 @@ const AUDIO_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
   'audio/x-wav': 'wav',
 };
 
-const PROCESSED_MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1_000;
-
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
-  private readonly processingMessageIds = new Set<string>();
-  private readonly processedMessageExpirations = new Map<string, number>();
 
   constructor(
     @Inject(whatsappConfig.KEY)
     private readonly config: ConfigType<typeof whatsappConfig>,
-    private readonly audioService: AudioService,
-    private readonly briefingService: BriefingService,
   ) {}
 
   isWebhookVerificationConfigured(): boolean {
@@ -211,12 +202,6 @@ export class WhatsAppService {
       );
     }
 
-    if (!message.phoneNumberId) {
-      throw new BadRequestException(
-        'The inbound WhatsApp message has no receiving phone-number ID.',
-      );
-    }
-
     this.assertCloudApiConfigured();
 
     const endpoint = new URL(
@@ -298,100 +283,6 @@ export class WhatsAppService {
     return replyMessageId;
   }
 
-  handleWebhook(payload: WhatsAppWebhookPayload): void {
-    this.removeExpiredProcessedMessageIds();
-
-    for (const message of this.extractAudioMessages(payload)) {
-      if (
-        this.processingMessageIds.has(message.id) ||
-        this.processedMessageExpirations.has(message.id)
-      ) {
-        this.logger.log(
-          JSON.stringify({
-            event: 'whatsapp.audio.duplicate_ignored',
-            messageId: message.id,
-          }),
-        );
-        continue;
-      }
-
-      this.logger.log(
-        JSON.stringify({
-          event: 'whatsapp.audio.received',
-          mediaId: message.mediaId,
-          messageId: message.id,
-          phoneNumberId: message.phoneNumberId,
-          voice: message.voice,
-        }),
-      );
-
-      this.processingMessageIds.add(message.id);
-      void this.processAudioMessage(message)
-        .then(() => {
-          this.processedMessageExpirations.set(
-            message.id,
-            Date.now() + PROCESSED_MESSAGE_RETENTION_MS,
-          );
-        })
-        .catch((error: unknown) => {
-          this.logger.error(
-            JSON.stringify({
-              event: 'whatsapp.audio.processing_failed',
-              messageId: message.id,
-              reason:
-                error instanceof Error ? error.message : 'processing_failed',
-            }),
-          );
-        })
-        .finally(() => {
-          this.processingMessageIds.delete(message.id);
-        });
-    }
-  }
-
-  extractAudioMessages(
-    payload: WhatsAppWebhookPayload,
-  ): WhatsAppAudioMessage[] {
-    if (payload.object !== 'whatsapp_business_account') {
-      this.logger.log("payload.object !== 'whatsapp_business_account'");
-      return [];
-    }
-
-    const audioMessages: WhatsAppAudioMessage[] = [];
-
-    for (const entry of payload.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        if (change.field !== 'messages') {
-          continue;
-        }
-
-        for (const message of change.value?.messages ?? []) {
-          if (
-            message.type !== 'audio' ||
-            !message.audio?.id ||
-            !message.from ||
-            !message.id
-          ) {
-            continue;
-          }
-
-          audioMessages.push({
-            from: message.from,
-            id: message.id,
-            mediaId: message.audio.id,
-            mimeType: message.audio.mime_type,
-            phoneNumberId: change.value?.metadata?.phone_number_id,
-            timestamp: message.timestamp,
-            voice: message.audio.voice === true,
-          });
-        }
-      }
-    }
-    this.logger.log('got ' + audioMessages.length + ' audio messages');
-
-    return audioMessages;
-  }
-
   private safeEqual(value: string, expected: string): boolean {
     const valueBuffer = Buffer.from(value);
     const expectedBuffer = Buffer.from(expected);
@@ -400,40 +291,6 @@ export class WhatsAppService {
       valueBuffer.length === expectedBuffer.length &&
       timingSafeEqual(valueBuffer, expectedBuffer)
     );
-  }
-
-  /**
-   * Runs the user-visible voice-message flow in strict order. A reply is sent
-   * only after every prior stage has completed successfully, preventing a
-   * partial or misleading briefing from reaching the user.
-   */
-  private async processAudioMessage(
-    message: WhatsAppAudioMessage,
-  ): Promise<void> {
-    const startedAt = Date.now();
-    const audioFile = await this.downloadAudio(message);
-    const transcription = await this.audioService.transcribe(audioFile);
-    const briefing = await this.briefingService.createBriefing(transcription);
-    const outboundMessageId = await this.reply(message, briefing.text);
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'whatsapp.audio.processing_completed',
-        durationMs: Date.now() - startedAt,
-        inboundMessageId: message.id,
-        outboundMessageId,
-      }),
-    );
-  }
-
-  private removeExpiredProcessedMessageIds(): void {
-    const now = Date.now();
-
-    for (const [messageId, expiresAt] of this.processedMessageExpirations) {
-      if (expiresAt <= now) {
-        this.processedMessageExpirations.delete(messageId);
-      }
-    }
   }
 
   private assertCloudApiConfigured(): void {

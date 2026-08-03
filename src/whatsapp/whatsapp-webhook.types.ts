@@ -1,7 +1,7 @@
 export interface WhatsAppMessageReference {
   from: string;
   id: string;
-  phoneNumberId?: string;
+  phoneNumberId: string;
 }
 
 export interface WhatsAppAudioMessage extends WhatsAppMessageReference {

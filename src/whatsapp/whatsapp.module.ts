@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AudioModule } from '../audio/audio.module';
 import { BriefingModule } from '../briefing/briefing.module';
+import { VoiceBriefingProcessor } from './voice-briefing.processor';
 import { whatsappConfig } from './whatsapp.config';
 import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppWebhookHandler } from './whatsapp-webhook.handler';
 import { WhatsAppService } from './whatsapp.service';
 
 @Module({
@@ -13,7 +15,7 @@ import { WhatsAppService } from './whatsapp.service';
     BriefingModule,
   ],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService],
+  providers: [WhatsAppService, WhatsAppWebhookHandler, VoiceBriefingProcessor],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}
