@@ -7,7 +7,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  MAX_AUDIO_FILE_SIZE_BYTES,
+  type UploadedAudioFile,
+} from '../audio/audio-file.interface';
 import { whatsappConfig } from './whatsapp.config';
 import type {
   WhatsAppAudioMessage,
@@ -18,6 +22,26 @@ import type {
 interface WhatsAppSendMessageResponse {
   messages?: Array<{ id?: string }>;
 }
+
+interface WhatsAppMediaMetadataResponse {
+  file_size?: number;
+  id?: string;
+  mime_type?: string;
+  sha256?: string;
+  url?: string;
+}
+
+const AUDIO_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'audio/aac': 'aac',
+  'audio/amr': 'amr',
+  'audio/mp4': 'm4a',
+  'audio/mpeg': 'mp3',
+  'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/x-wav': 'wav',
+};
 
 @Injectable()
 export class WhatsAppService {
@@ -64,6 +88,85 @@ export class WhatsAppService {
   }
 
   /**
+   * Resolves and downloads audio attached to an inbound WhatsApp message.
+   *
+   * Meta's media URL is short-lived and still requires bearer authentication,
+   * so both requests happen within this method. The returned object can be
+   * passed directly to AudioService.transcribe().
+   */
+  async downloadAudio(
+    message: WhatsAppAudioMessage,
+  ): Promise<UploadedAudioFile> {
+    this.assertCloudApiConfigured();
+
+    const metadataEndpoint = new URL(
+      `${this.config.graphApiVersion}/${encodeURIComponent(message.mediaId)}`,
+      'https://graph.facebook.com',
+    );
+    const metadataResponse = await this.fetchFromWhatsApp(
+      metadataEndpoint,
+      'metadata',
+      message,
+    );
+    const metadata =
+      await this.parseJsonResponse<WhatsAppMediaMetadataResponse>(
+        metadataResponse,
+        'WhatsApp returned invalid audio metadata.',
+      );
+
+    if (!metadata.url || !metadata.mime_type?.startsWith('audio/')) {
+      throw new BadGatewayException(
+        'WhatsApp returned incomplete audio metadata.',
+      );
+    }
+
+    if (
+      metadata.file_size !== undefined &&
+      metadata.file_size > MAX_AUDIO_FILE_SIZE_BYTES
+    ) {
+      throw new BadGatewayException(
+        'The WhatsApp audio file exceeds the 25 MiB limit.',
+      );
+    }
+
+    const mediaUrl = this.parseTrustedMediaUrl(metadata.url);
+    const mediaResponse = await this.fetchFromWhatsApp(
+      mediaUrl,
+      'content',
+      message,
+    );
+    const buffer = await this.readBoundedMediaBody(mediaResponse);
+
+    if (metadata.sha256 && !this.matchesSha256(buffer, metadata.sha256)) {
+      throw new BadGatewayException(
+        'The downloaded WhatsApp audio failed its integrity check.',
+      );
+    }
+
+    const mimeType = metadata.mime_type;
+    const baseMimeType = mimeType.split(';', 1)[0].trim().toLowerCase();
+    const extension = AUDIO_FILE_EXTENSIONS[baseMimeType] ?? 'audio';
+    const safeMediaId = message.mediaId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'whatsapp.audio.downloaded',
+        mediaId: message.mediaId,
+        messageId: message.id,
+        mimeType,
+        size: buffer.length,
+      }),
+    );
+
+    return {
+      buffer,
+      mimetype: mimeType,
+      originalname: `whatsapp-${safeMediaId}.${extension}`,
+      size: buffer.length,
+    };
+  }
+
+  /**
    * Sends a plain-text WhatsApp reply linked to an inbound message.
    *
    * The receiving phone-number ID comes from the webhook payload so this also
@@ -92,11 +195,7 @@ export class WhatsAppService {
       );
     }
 
-    if (!this.config.accessToken || !this.config.graphApiVersion) {
-      throw new ServiceUnavailableException(
-        'WhatsApp message sending is not configured.',
-      );
-    }
+    this.assertCloudApiConfigured();
 
     const endpoint = new URL(
       `${this.config.graphApiVersion}/${encodeURIComponent(message.phoneNumberId)}/messages`,
@@ -240,5 +339,138 @@ export class WhatsAppService {
       valueBuffer.length === expectedBuffer.length &&
       timingSafeEqual(valueBuffer, expectedBuffer)
     );
+  }
+
+  private assertCloudApiConfigured(): void {
+    if (!this.config.accessToken || !this.config.graphApiVersion) {
+      throw new ServiceUnavailableException(
+        'The WhatsApp Cloud API is not configured.',
+      );
+    }
+  }
+
+  private async fetchFromWhatsApp(
+    url: URL,
+    resource: 'content' | 'metadata',
+    message: WhatsAppAudioMessage,
+  ): Promise<Response> {
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${this.config.accessToken}` },
+      });
+    } catch (error) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'whatsapp.audio.download_failed',
+          mediaId: message.mediaId,
+          messageId: message.id,
+          reason: error instanceof Error ? error.message : 'request_failed',
+          resource,
+        }),
+      );
+      throw new BadGatewayException('WhatsApp media could not be reached.');
+    }
+
+    if (!response.ok) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'whatsapp.audio.download_rejected',
+          mediaId: message.mediaId,
+          messageId: message.id,
+          resource,
+          status: response.status,
+        }),
+      );
+      throw new BadGatewayException('WhatsApp rejected the media download.');
+    }
+
+    return response;
+  }
+
+  private async parseJsonResponse<T>(
+    response: Response,
+    errorMessage: string,
+  ): Promise<T> {
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new BadGatewayException(errorMessage);
+    }
+  }
+
+  private parseTrustedMediaUrl(value: string): URL {
+    let url: URL;
+
+    try {
+      url = new URL(value);
+    } catch {
+      throw new BadGatewayException('WhatsApp returned an invalid media URL.');
+    }
+
+    const trustedHost = ['facebook.com', 'fbcdn.net', 'fbsbx.com'].some(
+      (domain) =>
+        url.hostname === domain || url.hostname.endsWith(`.${domain}`),
+    );
+
+    if (url.protocol !== 'https:' || !trustedHost) {
+      throw new BadGatewayException(
+        'WhatsApp returned an untrusted media URL.',
+      );
+    }
+
+    return url;
+  }
+
+  private async readBoundedMediaBody(response: Response): Promise<Buffer> {
+    const contentLength = Number(response.headers.get('content-length'));
+
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_AUDIO_FILE_SIZE_BYTES
+    ) {
+      throw new BadGatewayException(
+        'The WhatsApp audio file exceeds the 25 MiB limit.',
+      );
+    }
+
+    if (!response.body) {
+      throw new BadGatewayException('WhatsApp returned an empty audio file.');
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      size += value.byteLength;
+      if (size > MAX_AUDIO_FILE_SIZE_BYTES) {
+        await reader.cancel();
+        throw new BadGatewayException(
+          'The WhatsApp audio file exceeds the 25 MiB limit.',
+        );
+      }
+      chunks.push(value);
+    }
+
+    if (size === 0) {
+      throw new BadGatewayException('WhatsApp returned an empty audio file.');
+    }
+
+    return Buffer.concat(chunks, size);
+  }
+
+  private matchesSha256(buffer: Buffer, expected: string): boolean {
+    const digestEncoding = /^[a-f\d]{64}$/i.test(expected) ? 'hex' : 'base64';
+    const actual = createHash('sha256').update(buffer).digest(digestEncoding);
+
+    return this.safeEqual(actual, expected);
   }
 }

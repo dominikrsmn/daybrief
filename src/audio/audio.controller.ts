@@ -9,10 +9,11 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Briefing } from '../briefing/briefing.schema';
 import { BriefingService } from '../briefing/briefing.service';
-import type { UploadedAudioFile } from './audio-file.interface';
+import {
+  MAX_AUDIO_FILE_SIZE_BYTES,
+  type UploadedAudioFile,
+} from './audio-file.interface';
 import { AudioService } from './audio.service';
-
-const MAX_AUDIO_FILE_SIZE = 25 * 1024 * 1024;
 
 @Controller('audio')
 export class AudioController {
@@ -26,7 +27,7 @@ export class AudioController {
     FileInterceptor('audio', {
       limits: {
         files: 1,
-        fileSize: MAX_AUDIO_FILE_SIZE,
+        fileSize: MAX_AUDIO_FILE_SIZE_BYTES,
       },
     }),
   )
