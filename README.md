@@ -44,6 +44,28 @@ $ pnpm run start:dev
 $ pnpm run start:prod
 ```
 
+## Database migrations
+
+Drizzle migration files are generated from
+`src/database/database.schema.ts` and stored in `drizzle/`. Set `DATABASE_URL`
+before running any migration command.
+
+```bash
+# Generate a migration after changing the Drizzle schema
+pnpm db:generate
+
+# Validate the migration history
+pnpm db:check
+
+# Apply pending migrations to the configured database
+pnpm db:migrate
+```
+
+Generate and review migrations in development before applying them. The
+application does not run migrations automatically during startup, which keeps
+schema changes separate from application deployment and avoids races between
+multiple instances.
+
 ## Static pages
 
 HTML files in `public` are served from clean, extensionless root URLs. For
