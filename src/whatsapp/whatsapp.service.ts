@@ -1,11 +1,23 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { whatsappConfig } from './whatsapp.config';
 import type {
   WhatsAppAudioMessage,
+  WhatsAppMessageReference,
   WhatsAppWebhookPayload,
 } from './whatsapp-webhook.types';
+
+interface WhatsAppSendMessageResponse {
+  messages?: Array<{ id?: string }>;
+}
 
 @Injectable()
 export class WhatsAppService {
@@ -51,10 +63,119 @@ export class WhatsAppService {
     return this.safeEqual(signature, expectedSignature);
   }
 
+  /**
+   * Sends a plain-text WhatsApp reply linked to an inbound message.
+   *
+   * The receiving phone-number ID comes from the webhook payload so this also
+   * works when the app is connected to more than one business phone number.
+   * Returns the provider-assigned ID of the outbound message.
+   */
+  async reply(
+    message: WhatsAppMessageReference,
+    body: string,
+  ): Promise<string> {
+    const normalizedBody = body.trim();
+
+    if (normalizedBody.length === 0) {
+      throw new BadRequestException('A WhatsApp reply body is required.');
+    }
+
+    if (normalizedBody.length > 4_096) {
+      throw new BadRequestException(
+        'A WhatsApp reply body cannot exceed 4096 characters.',
+      );
+    }
+
+    if (!message.phoneNumberId) {
+      throw new BadRequestException(
+        'The inbound WhatsApp message has no receiving phone-number ID.',
+      );
+    }
+
+    if (!this.config.accessToken || !this.config.graphApiVersion) {
+      throw new ServiceUnavailableException(
+        'WhatsApp message sending is not configured.',
+      );
+    }
+
+    const endpoint = new URL(
+      `${this.config.graphApiVersion}/${encodeURIComponent(message.phoneNumberId)}/messages`,
+      'https://graph.facebook.com',
+    );
+
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: message.from,
+          context: { message_id: message.id },
+          type: 'text',
+          text: {
+            body: normalizedBody,
+            preview_url: false,
+          },
+        }),
+      });
+    } catch (error) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'whatsapp.reply.failed',
+          messageId: message.id,
+          reason: error instanceof Error ? error.message : 'request_failed',
+        }),
+      );
+      throw new BadGatewayException('WhatsApp could not be reached.');
+    }
+
+    if (!response.ok) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'whatsapp.reply.rejected',
+          messageId: message.id,
+          status: response.status,
+        }),
+      );
+      throw new BadGatewayException('WhatsApp rejected the reply.');
+    }
+
+    let result: WhatsAppSendMessageResponse;
+
+    try {
+      result = (await response.json()) as WhatsAppSendMessageResponse;
+    } catch {
+      throw new BadGatewayException(
+        'WhatsApp returned an invalid reply response.',
+      );
+    }
+    const replyMessageId = result.messages?.[0]?.id;
+
+    if (!replyMessageId) {
+      throw new BadGatewayException(
+        'WhatsApp did not return an outbound message ID.',
+      );
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'whatsapp.reply.sent',
+        inboundMessageId: message.id,
+        outboundMessageId: replyMessageId,
+      }),
+    );
+
+    return replyMessageId;
+  }
+
   handleWebhook(payload: WhatsAppWebhookPayload): void {
-    this.logger.log('received handleWebhook');
     for (const message of this.extractAudioMessages(payload)) {
-      this.logger.log('working on message');
       // Media download, transcription and reply orchestration will live here.
       this.logger.log(
         JSON.stringify({

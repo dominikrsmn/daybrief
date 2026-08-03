@@ -75,6 +75,8 @@ OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
 OPENAI_BRIEFING_MODEL=gpt-5.6
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=your-verify-token
 WHATSAPP_APP_SECRET=your-app-secret
+WHATSAPP_ACCESS_TOKEN=your-system-user-access-token
+WHATSAPP_GRAPH_API_VERSION=vXX.X
 ```
 
 Do not commit secrets or pass them as Docker build arguments. Coolify injects the
@@ -110,7 +112,9 @@ In **Meta App Dashboard → WhatsApp → Configuration → Webhook**:
 Set `WHATSAPP_APP_SECRET` in Coolify to the app secret from **App settings →
 Basic**. Meta signs event deliveries with this secret; unsigned or incorrectly
 signed requests are rejected. Redeploy after changing Coolify environment
-variables.
+variables. `WHATSAPP_ACCESS_TOKEN` authorizes replies through the Cloud API;
+prefer a system-user token rather than a temporary dashboard token. Set
+`WHATSAPP_GRAPH_API_VERSION` to the Graph API version used by your Meta app.
 
 When a user sends a voice message to the connected WhatsApp Cloud API number,
 the app responds to Meta immediately and writes a structured

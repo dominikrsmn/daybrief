@@ -1,9 +1,12 @@
-export interface WhatsAppAudioMessage {
+export interface WhatsAppMessageReference {
   from: string;
   id: string;
+  phoneNumberId?: string;
+}
+
+export interface WhatsAppAudioMessage extends WhatsAppMessageReference {
   mediaId: string;
   mimeType?: string;
-  phoneNumberId?: string;
   timestamp?: string;
   voice: boolean;
 }

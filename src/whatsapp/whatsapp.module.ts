@@ -8,5 +8,6 @@ import { WhatsAppService } from './whatsapp.service';
   imports: [ConfigModule.forFeature(whatsappConfig)],
   controllers: [WhatsAppController],
   providers: [WhatsAppService],
+  exports: [WhatsAppService],
 })
 export class WhatsAppModule {}
