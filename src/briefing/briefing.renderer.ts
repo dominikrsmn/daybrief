@@ -18,7 +18,6 @@ const PRIORITY_ORDER: Readonly<Record<Task['priority'], number>> = {
  */
 export function renderWhatsAppBriefing(briefing: Briefing): string {
   const sections = [
-    renderWakeupTime(briefing.wakeupTime),
     renderCommitments(briefing.commitments),
     renderTasks(briefing.tasks),
     renderSimpleList('Reminders', briefing.reminders, (reminder) =>
@@ -43,10 +42,6 @@ export function renderWhatsAppBriefing(briefing: Briefing): string {
   const cutAt = lastCompleteLine > 0 ? lastCompleteLine : availableLength;
 
   return `${message.slice(0, cutAt).trimEnd()}${TRUNCATION_NOTICE}`;
-}
-
-function renderWakeupTime(wakeupTime: string | null): string | null {
-  return wakeupTime ? `*Wake-up*\n• ${clean(wakeupTime)}` : null;
 }
 
 function renderCommitments(
