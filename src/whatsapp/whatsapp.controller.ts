@@ -15,13 +15,13 @@ import {
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import type { WhatsAppWebhookPayload } from './whatsapp-webhook.types';
+import { WhatsAppWebhookAuthenticator } from './whatsapp-webhook.authenticator';
 import { WhatsAppWebhookHandler } from './whatsapp-webhook.handler';
-import { WhatsAppService } from './whatsapp.service';
 
 @Controller('webhooks/whatsapp')
 export class WhatsAppController {
   constructor(
-    private readonly whatsappService: WhatsAppService,
+    private readonly webhookAuthenticator: WhatsAppWebhookAuthenticator,
     private readonly webhookHandler: WhatsAppWebhookHandler,
   ) {}
 
@@ -31,7 +31,7 @@ export class WhatsAppController {
     @Query('hub.verify_token') verifyToken?: string,
     @Query('hub.challenge') challenge?: string,
   ): string {
-    if (!this.whatsappService.isWebhookVerificationConfigured()) {
+    if (!this.webhookAuthenticator.isVerificationConfigured()) {
       throw new ServiceUnavailableException(
         'WHATSAPP_WEBHOOK_VERIFY_TOKEN is not configured.',
       );
@@ -40,7 +40,7 @@ export class WhatsAppController {
     if (
       mode !== 'subscribe' ||
       challenge === undefined ||
-      !this.whatsappService.isValidVerifyToken(verifyToken)
+      !this.webhookAuthenticator.isValidVerifyToken(verifyToken)
     ) {
       throw new ForbiddenException('Webhook verification failed.');
     }
@@ -56,13 +56,15 @@ export class WhatsAppController {
     @Headers('x-request-id') requestId: string | undefined,
     @Body() payload: WhatsAppWebhookPayload,
   ): { received: true } {
-    if (!this.whatsappService.isWebhookSignatureConfigured()) {
+    if (!this.webhookAuthenticator.isSignatureConfigured()) {
       throw new ServiceUnavailableException(
         'WHATSAPP_APP_SECRET is not configured.',
       );
     }
 
-    if (!this.whatsappService.isValidSignature(request.rawBody, signature)) {
+    if (
+      !this.webhookAuthenticator.isValidSignature(request.rawBody, signature)
+    ) {
       throw new UnauthorizedException('Invalid webhook signature.');
     }
 

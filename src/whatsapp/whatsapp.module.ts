@@ -5,6 +5,7 @@ import { BriefingModule } from '../briefing/briefing.module';
 import { VoiceBriefingProcessor } from './voice-briefing.processor';
 import { whatsappConfig } from './whatsapp.config';
 import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppWebhookAuthenticator } from './whatsapp-webhook.authenticator';
 import { WhatsAppWebhookHandler } from './whatsapp-webhook.handler';
 import { WhatsAppService } from './whatsapp.service';
 
@@ -15,7 +16,12 @@ import { WhatsAppService } from './whatsapp.service';
     BriefingModule,
   ],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService, WhatsAppWebhookHandler, VoiceBriefingProcessor],
+  providers: [
+    WhatsAppService,
+    WhatsAppWebhookAuthenticator,
+    WhatsAppWebhookHandler,
+    VoiceBriefingProcessor,
+  ],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}

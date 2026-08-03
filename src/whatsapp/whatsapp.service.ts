@@ -6,7 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   MAX_AUDIO_FILE_SIZE_BYTES,
   type UploadedAudioFile,
@@ -68,41 +68,6 @@ export class WhatsAppService {
     @Inject(whatsappConfig.KEY)
     private readonly config: ConfigType<typeof whatsappConfig>,
   ) {}
-
-  isWebhookVerificationConfigured(): boolean {
-    return this.config.verifyToken.length > 0;
-  }
-
-  isValidVerifyToken(token?: string): boolean {
-    if (!this.isWebhookVerificationConfigured() || token === undefined) {
-      return false;
-    }
-
-    return this.safeEqual(token, this.config.verifyToken);
-  }
-
-  isWebhookSignatureConfigured(): boolean {
-    return this.config.appSecret.length > 0;
-  }
-
-  isValidSignature(rawBody: Buffer | undefined, signature?: string): boolean {
-    if (
-      !this.isWebhookSignatureConfigured() ||
-      !rawBody ||
-      !signature?.startsWith('sha256=')
-    ) {
-      return false;
-    }
-
-    const expectedSignature = `sha256=${createHmac(
-      'sha256',
-      this.config.appSecret,
-    )
-      .update(rawBody)
-      .digest('hex')}`;
-
-    return this.safeEqual(signature, expectedSignature);
-  }
 
   /**
    * Resolves and downloads audio attached to an inbound WhatsApp message.
