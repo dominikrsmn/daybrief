@@ -9,7 +9,12 @@ import type { WhatsAppAudioMessage } from './whatsapp-webhook.types';
 import {
   WhatsAppService,
   type WhatsAppDownloadTelemetry,
+  type WhatsAppMessageActionTelemetry,
 } from './whatsapp.service';
+
+const PROCESSING_REACTION = '🔄';
+const COMPLETED_REACTION = '👍';
+const FAILED_REACTION = '❌';
 
 export interface VoiceBriefingTelemetry {
   audio?: {
@@ -34,6 +39,12 @@ export interface VoiceBriefingTelemetry {
     character_count: number;
     duration_ms: number;
   };
+  whatsapp_actions?: {
+    completed_reaction: WhatsAppMessageActionTelemetry;
+    failed_reaction: WhatsAppMessageActionTelemetry;
+    processing_reaction: WhatsAppMessageActionTelemetry;
+    read_receipt: WhatsAppMessageActionTelemetry;
+  };
   whatsapp_download?: WhatsAppDownloadTelemetry;
 }
 
@@ -52,6 +63,45 @@ export class VoiceBriefingProcessor {
     message: WhatsAppAudioMessage,
     telemetry: VoiceBriefingTelemetry,
   ): Promise<{ briefingId: string; scheduledAt: string }> {
+    const actionTelemetry = {
+      completed_reaction: {},
+      failed_reaction: {},
+      processing_reaction: {},
+      read_receipt: {},
+    } satisfies NonNullable<VoiceBriefingTelemetry['whatsapp_actions']>;
+    telemetry.whatsapp_actions = actionTelemetry;
+
+    await this.performBestEffortMessageAction(
+      () =>
+        this.whatsAppService.react(
+          message,
+          PROCESSING_REACTION,
+          actionTelemetry.processing_reaction,
+        ),
+      actionTelemetry.processing_reaction,
+    );
+
+    try {
+      return await this.processBriefing(message, telemetry, actionTelemetry);
+    } catch (error) {
+      await this.performBestEffortMessageAction(
+        () =>
+          this.whatsAppService.react(
+            message,
+            FAILED_REACTION,
+            actionTelemetry.failed_reaction,
+          ),
+        actionTelemetry.failed_reaction,
+      );
+      throw error;
+    }
+  }
+
+  private async processBriefing(
+    message: WhatsAppAudioMessage,
+    telemetry: VoiceBriefingTelemetry,
+    actionTelemetry: NonNullable<VoiceBriefingTelemetry['whatsapp_actions']>,
+  ): Promise<{ briefingId: string; scheduledAt: string }> {
     let stageStartedAt = Date.now();
     const downloadTelemetry: WhatsAppDownloadTelemetry = {};
     telemetry.whatsapp_download = downloadTelemetry;
@@ -64,6 +114,12 @@ export class VoiceBriefingProcessor {
       mime_type: audioFile.mimetype,
       size_bytes: audioFile.size,
     };
+
+    await this.performBestEffortMessageAction(
+      () =>
+        this.whatsAppService.markAsRead(message, actionTelemetry.read_receipt),
+      actionTelemetry.read_receipt,
+    );
 
     stageStartedAt = Date.now();
     const transcription = await this.audioService.transcribe(audioFile);
@@ -110,9 +166,34 @@ export class VoiceBriefingProcessor {
       source: schedule.source,
     };
 
+    await this.performBestEffortMessageAction(
+      () =>
+        this.whatsAppService.react(
+          message,
+          COMPLETED_REACTION,
+          actionTelemetry.completed_reaction,
+        ),
+      actionTelemetry.completed_reaction,
+    );
+
     return {
       briefingId: scheduledBriefing.id,
       scheduledAt: scheduledBriefing.scheduledAt,
     };
+  }
+
+  /**
+   * Delivery-state updates improve the chat UX but must not discard a valid
+   * briefing when Meta temporarily rejects an otherwise optional update.
+   */
+  private async performBestEffortMessageAction(
+    action: () => Promise<void>,
+    telemetry: WhatsAppMessageActionTelemetry,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch {
+      telemetry.outcome = 'error';
+    }
   }
 }

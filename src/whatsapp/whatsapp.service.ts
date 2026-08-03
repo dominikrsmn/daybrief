@@ -62,6 +62,11 @@ export interface WhatsAppReplyTelemetry {
   status_code?: number;
 }
 
+export interface WhatsAppMessageActionTelemetry {
+  outcome?: 'error' | 'success';
+  status_code?: number;
+}
+
 @Injectable()
 export class WhatsAppService {
   constructor(
@@ -161,6 +166,91 @@ export class WhatsAppService {
     telemetry: WhatsAppReplyTelemetry = {},
   ): Promise<string> {
     return this.sendText(message, body, telemetry);
+  }
+
+  /** Marks an inbound message as read for the user who sent it. */
+  async markAsRead(
+    message: WhatsAppMessageReference,
+    telemetry: WhatsAppMessageActionTelemetry = {},
+  ): Promise<void> {
+    await this.performMessageAction(
+      message,
+      {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: message.id,
+      },
+      'WhatsApp rejected the read receipt.',
+      telemetry,
+    );
+  }
+
+  /** Adds or replaces this business account's reaction to an inbound message. */
+  async react(
+    message: WhatsAppMessageReference,
+    emoji: string,
+    telemetry: WhatsAppMessageActionTelemetry = {},
+  ): Promise<void> {
+    if (!emoji.trim()) {
+      throw new BadRequestException('A WhatsApp reaction emoji is required.');
+    }
+
+    await this.performMessageAction(
+      message,
+      {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: message.from,
+        type: 'reaction',
+        reaction: {
+          message_id: message.id,
+          emoji,
+        },
+      },
+      'WhatsApp rejected the message reaction.',
+      telemetry,
+    );
+  }
+
+  private async performMessageAction(
+    message: WhatsAppMessageReference,
+    body: Record<string, unknown>,
+    rejectionMessage: string,
+    telemetry: WhatsAppMessageActionTelemetry,
+  ): Promise<void> {
+    this.assertCloudApiConfigured();
+
+    const endpoint = new URL(
+      `${this.config.graphApiVersion}/${encodeURIComponent(message.phoneNumberId)}/messages`,
+      'https://graph.facebook.com',
+    );
+
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      telemetry.outcome = 'error';
+      throw new BadGatewayException('WhatsApp could not be reached.');
+    }
+
+    telemetry.status_code = response.status;
+
+    if (!response.ok) {
+      telemetry.outcome = 'error';
+      await this.discardResponseBody(response);
+      throw new BadGatewayException(rejectionMessage);
+    }
+
+    telemetry.outcome = 'success';
+    await this.discardResponseBody(response);
   }
 
   private async sendText(
