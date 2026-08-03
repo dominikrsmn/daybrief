@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AudioService } from '../audio/audio.service';
-import { renderWhatsAppBriefing } from '../briefing/briefing.renderer';
+import { renderWhatsAppBriefingMessages } from '../briefing/briefing.renderer';
 import { BriefingService } from '../briefing/briefing.service';
 import type { WhatsAppAudioMessage } from './whatsapp-webhook.types';
 import {
@@ -26,15 +26,16 @@ export interface VoiceBriefingTelemetry {
   };
   reply?: {
     duration_ms: number;
-    message_length_chars: number;
-    outbound_message_id: string;
+    message_count: number;
+    outbound_message_ids: string[];
+    total_length_chars: number;
   };
   transcription?: {
     character_count: number;
     duration_ms: number;
   };
   whatsapp_download?: WhatsAppDownloadTelemetry;
-  whatsapp_reply?: WhatsAppReplyTelemetry;
+  whatsapp_replies?: WhatsAppReplyTelemetry[];
 }
 
 @Injectable()
@@ -48,7 +49,7 @@ export class VoiceBriefingProcessor {
   async process(
     message: WhatsAppAudioMessage,
     telemetry: VoiceBriefingTelemetry,
-  ): Promise<string> {
+  ): Promise<readonly string[]> {
     let stageStartedAt = Date.now();
     const downloadTelemetry: WhatsAppDownloadTelemetry = {};
     telemetry.whatsapp_download = downloadTelemetry;
@@ -80,22 +81,30 @@ export class VoiceBriefingProcessor {
       reminders: briefing.reminders.length,
       tasks: briefing.tasks.length,
     };
-    const reply = renderWhatsAppBriefing(briefing);
+    const replies = renderWhatsAppBriefingMessages(briefing);
 
     stageStartedAt = Date.now();
-    const replyTelemetry: WhatsAppReplyTelemetry = {};
-    telemetry.whatsapp_reply = replyTelemetry;
-    const outboundMessageId = await this.whatsAppService.reply(
-      message,
-      reply,
-      replyTelemetry,
-    );
+    const replyTelemetry = replies.map((): WhatsAppReplyTelemetry => ({}));
+    telemetry.whatsapp_replies = replyTelemetry;
+    const outboundMessageIds: string[] = [];
+
+    // Awaiting each send preserves the briefing's section order in WhatsApp.
+    for (const [index, reply] of replies.entries()) {
+      outboundMessageIds.push(
+        await this.whatsAppService.reply(message, reply, replyTelemetry[index]),
+      );
+    }
+
     telemetry.reply = {
       duration_ms: Date.now() - stageStartedAt,
-      message_length_chars: reply.length,
-      outbound_message_id: outboundMessageId,
+      message_count: replies.length,
+      outbound_message_ids: outboundMessageIds,
+      total_length_chars: replies.reduce(
+        (total, reply) => total + reply.length,
+        0,
+      ),
     };
 
-    return outboundMessageId;
+    return outboundMessageIds;
   }
 }

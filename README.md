@@ -125,10 +125,10 @@ prefer a system-user token rather than a temporary dashboard token. Set
 
 When a user sends a voice message to the connected WhatsApp Cloud API number,
 the app acknowledges Meta immediately, then downloads the audio, transcribes it,
-creates the morning briefing, and replies to the original WhatsApp message with
-the briefing text. English and German recordings are rendered in their dominant
-language; mixed-language recordings use the dominant language, with English as
-the fallback when it cannot be determined. One structured canonical event
+creates the morning briefing, and replies with an introductory title and one
+message per non-empty briefing section. English and German recordings are
+rendered in their dominant language; mixed-language recordings use the dominant
+language, with English as the fallback when it cannot be determined. One structured canonical event
 records the completed workflow and its stage metrics without logging the audio,
 transcript, briefing, or reply contents. Duplicate
 webhook deliveries are suppressed in memory while processing and for 24 hours

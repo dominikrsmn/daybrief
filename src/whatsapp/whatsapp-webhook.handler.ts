@@ -95,7 +95,7 @@ export class WhatsAppWebhookHandler {
     this.processingMessageIds.add(message.id);
     void this.voiceBriefingProcessor
       .process(message, telemetry)
-      .then((outboundMessageId) => {
+      .then((outboundMessageIds) => {
         this.processedMessageExpirations.set(
           message.id,
           Date.now() + PROCESSED_MESSAGE_RETENTION_MS,
@@ -106,7 +106,7 @@ export class WhatsAppWebhookHandler {
           message: {
             inbound_message_id: message.id,
             media_id: message.mediaId,
-            outbound_message_id: outboundMessageId,
+            outbound_message_ids: outboundMessageIds,
             phone_number_id: message.phoneNumberId,
             provider_timestamp: message.timestamp,
             voice: message.voice,

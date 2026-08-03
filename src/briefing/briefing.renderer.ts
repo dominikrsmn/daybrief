@@ -5,6 +5,7 @@ const WHATSAPP_MESSAGE_LIMIT = 4_096;
 type Task = Briefing['tasks'][number];
 type RendererCopy = {
   title: string;
+  greeting: string;
   fixedSchedule: string;
   tasks: string;
   reminders: string;
@@ -19,6 +20,7 @@ type RendererCopy = {
 const COPY = {
   en: {
     title: 'Your day brief',
+    greeting: "Good morning! Here's your overview for the day.",
     fixedSchedule: 'Fixed schedule',
     tasks: 'Tasks',
     reminders: 'Reminders',
@@ -31,6 +33,7 @@ const COPY = {
   },
   de: {
     title: 'Dein Daybrief',
+    greeting: 'Guten Morgen! Hier ist dein Überblick für den Tag.',
     fixedSchedule: 'Feste Termine',
     tasks: 'Aufgaben',
     reminders: 'Erinnerungen',
@@ -56,11 +59,13 @@ const PRIORITY_EMOJI: Readonly<Record<Task['priority'], string>> = {
 };
 
 /**
- * Renders semantic briefing facts for WhatsApp. Keeping this deterministic
- * makes the channel output consistent and keeps formatting out of the model's
- * responsibilities.
+ * Renders semantic briefing facts as one WhatsApp message per visible section.
+ * Keeping this deterministic makes the channel output consistent and keeps
+ * formatting out of the model's responsibilities.
  */
-export function renderWhatsAppBriefing(briefing: Briefing): string {
+export function renderWhatsAppBriefingMessages(
+  briefing: Briefing,
+): readonly string[] {
   const copy: RendererCopy = COPY[briefing.language];
   const sections = [
     renderCommitments(briefing.commitments, copy),
@@ -76,13 +81,17 @@ export function renderWhatsAppBriefing(briefing: Briefing): string {
     ),
   ].filter((section): section is string => section !== null);
 
-  const message = [`*${copy.title}*`, ...sections].join('\n\n');
+  return [`*${copy.title}*\n${copy.greeting}`, ...sections].map((message) =>
+    truncateMessage(message, copy.truncationNotice),
+  );
+}
 
+function truncateMessage(message: string, notice: string): string {
   if (message.length <= WHATSAPP_MESSAGE_LIMIT) {
     return message;
   }
 
-  const truncationNotice = `\n\n_${copy.truncationNotice}_`;
+  const truncationNotice = `\n\n_${notice}_`;
   const availableLength = WHATSAPP_MESSAGE_LIMIT - truncationNotice.length;
   const lastCompleteLine = message.lastIndexOf('\n', availableLength);
   const cutAt = lastCompleteLine > 0 ? lastCompleteLine : availableLength;
