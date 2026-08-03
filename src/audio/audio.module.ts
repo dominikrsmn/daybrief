@@ -7,5 +7,6 @@ import { AudioService } from './audio.service';
   imports: [BriefingModule],
   controllers: [AudioController],
   providers: [AudioService],
+  exports: [AudioService],
 })
 export class AudioModule {}

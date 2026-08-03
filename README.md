@@ -117,9 +117,12 @@ prefer a system-user token rather than a temporary dashboard token. Set
 `WHATSAPP_GRAPH_API_VERSION` to the Graph API version used by your Meta app.
 
 When a user sends a voice message to the connected WhatsApp Cloud API number,
-the app responds to Meta immediately and writes a structured
-`whatsapp.audio.received` event to the application logs. The event contains the
-message ID and media ID needed for the next media-download/transcription step.
+the app acknowledges Meta immediately, then downloads the audio, transcribes it,
+creates the morning briefing, and replies to the original WhatsApp message with
+the briefing text. Structured log events record each stage without logging the
+audio, transcript, or briefing contents. Duplicate webhook deliveries are
+suppressed in memory while processing and for 24 hours after successful
+processing. Failed attempts are not retained in the duplicate cache.
 
 You can verify the callback challenge after deployment:
 
