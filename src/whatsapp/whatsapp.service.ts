@@ -56,6 +56,21 @@ const AUDIO_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
   'audio/x-wav': 'wav',
 };
 
+const WHATSAPP_FETCH_MAX_ATTEMPTS = 3;
+const WHATSAPP_FETCH_RETRY_BASE_DELAY_MS = 250;
+const WHATSAPP_FETCH_RETRY_MAX_DELAY_MS = 5_000;
+const RETRYABLE_HTTP_STATUSES = new Set([
+  408, 425, 429, 500, 502, 503, 504,
+]);
+
+interface NetworkErrorDetails {
+  address?: string;
+  code?: string;
+  message?: string;
+  port?: number;
+  syscall?: string;
+}
+
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
@@ -306,29 +321,66 @@ export class WhatsAppService {
     resource: 'content' | 'metadata',
     message: WhatsAppAudioMessage,
   ): Promise<Response> {
-    let response: Response;
+    // Media retrieval is GET-only, so transient retries cannot duplicate a
+    // provider-side mutation. Permanent client errors still fail immediately.
+    for (let attempt = 1; attempt <= WHATSAPP_FETCH_MAX_ATTEMPTS; attempt++) {
+      let response: Response;
 
-    try {
-      response = await fetch(url, {
-        headers: { Authorization: `Bearer ${this.config.accessToken}` },
-      });
-    } catch (error) {
-      this.logger.error(
-        JSON.stringify({
-          event: 'whatsapp.audio.download_failed',
-          mediaId: message.mediaId,
-          messageId: message.id,
-          reason: error instanceof Error ? error.message : 'request_failed',
-          resource,
-        }),
-      );
-      throw new BadGatewayException('WhatsApp media could not be reached.');
-    }
+      try {
+        response = await fetch(url, {
+          headers: { Authorization: `Bearer ${this.config.accessToken}` },
+        });
+      } catch (error) {
+        if (attempt < WHATSAPP_FETCH_MAX_ATTEMPTS) {
+          const delayMs = this.calculateRetryDelay(attempt);
+          this.logDownloadRetry(message, resource, attempt, delayMs, {
+            networkError: this.getNetworkErrorDetails(error),
+            reason:
+              error instanceof Error ? error.message : 'request_failed',
+          });
+          await this.delay(delayMs);
+          continue;
+        }
 
-    if (!response.ok) {
+        this.logger.error(
+          JSON.stringify({
+            event: 'whatsapp.audio.download_failed',
+            attempt,
+            mediaId: message.mediaId,
+            messageId: message.id,
+            networkError: this.getNetworkErrorDetails(error),
+            reason:
+              error instanceof Error ? error.message : 'request_failed',
+            resource,
+          }),
+        );
+        throw new BadGatewayException('WhatsApp media could not be reached.');
+      }
+
+      if (response.ok) {
+        return response;
+      }
+
+      if (
+        RETRYABLE_HTTP_STATUSES.has(response.status) &&
+        attempt < WHATSAPP_FETCH_MAX_ATTEMPTS
+      ) {
+        const delayMs = this.calculateRetryDelay(
+          attempt,
+          response.headers.get('retry-after'),
+        );
+        await this.discardResponseBody(response);
+        this.logDownloadRetry(message, resource, attempt, delayMs, {
+          status: response.status,
+        });
+        await this.delay(delayMs);
+        continue;
+      }
+
       this.logger.error(
         JSON.stringify({
           event: 'whatsapp.audio.download_rejected',
+          attempt,
           mediaId: message.mediaId,
           messageId: message.id,
           resource,
@@ -338,7 +390,98 @@ export class WhatsAppService {
       throw new BadGatewayException('WhatsApp rejected the media download.');
     }
 
-    return response;
+    throw new BadGatewayException('WhatsApp media could not be reached.');
+  }
+
+  private calculateRetryDelay(
+    failedAttempt: number,
+    retryAfterHeader?: string | null,
+  ): number {
+    const exponentialDelay = Math.min(
+      WHATSAPP_FETCH_RETRY_BASE_DELAY_MS * 2 ** (failedAttempt - 1),
+      WHATSAPP_FETCH_RETRY_MAX_DELAY_MS,
+    );
+    const jitteredDelay = Math.round(
+      exponentialDelay * (0.75 + Math.random() * 0.5),
+    );
+    const retryAfterDelay = this.parseRetryAfter(retryAfterHeader);
+
+    return Math.min(
+      Math.max(jitteredDelay, retryAfterDelay ?? 0),
+      WHATSAPP_FETCH_RETRY_MAX_DELAY_MS,
+    );
+  }
+
+  private parseRetryAfter(value?: string | null): number | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.round(seconds * 1_000);
+    }
+
+    const date = Date.parse(value);
+    return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+  }
+
+  private async discardResponseBody(response: Response): Promise<void> {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // The retry is still safe if the remote peer already closed the body.
+    }
+  }
+
+  private logDownloadRetry(
+    message: WhatsAppAudioMessage,
+    resource: 'content' | 'metadata',
+    failedAttempt: number,
+    delayMs: number,
+    details: {
+      networkError?: NetworkErrorDetails;
+      reason?: string;
+      status?: number;
+    },
+  ): void {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'whatsapp.audio.download_retry_scheduled',
+        attempt: failedAttempt,
+        delayMs,
+        ...details,
+        mediaId: message.mediaId,
+        messageId: message.id,
+        nextAttempt: failedAttempt + 1,
+        resource,
+      }),
+    );
+  }
+
+  private getNetworkErrorDetails(
+    error: unknown,
+  ): NetworkErrorDetails | undefined {
+    if (
+      !(error instanceof Error) ||
+      !error.cause ||
+      typeof error.cause !== 'object'
+    ) {
+      return undefined;
+    }
+
+    const cause = error.cause as Record<string, unknown>;
+    return {
+      address: typeof cause.address === 'string' ? cause.address : undefined,
+      code: typeof cause.code === 'string' ? cause.code : undefined,
+      message: typeof cause.message === 'string' ? cause.message : undefined,
+      port: typeof cause.port === 'number' ? cause.port : undefined,
+      syscall: typeof cause.syscall === 'string' ? cause.syscall : undefined,
+    };
+  }
+
+  private delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   private async parseJsonResponse<T>(
