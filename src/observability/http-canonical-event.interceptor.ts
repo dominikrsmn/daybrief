@@ -27,13 +27,18 @@ export class HttpCanonicalEventInterceptor implements NestInterceptor {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
-    const startedAt = Date.now();
     const requestId = this.readRequestId(request);
-    const traceId = this.readTraceId(request);
-    let capturedError: unknown;
 
     response.setHeader('x-request-id', requestId);
     request.headers['x-request-id'] = requestId;
+
+    if (request.method === 'GET' && request.path === '/health') {
+      return next.handle();
+    }
+
+    const startedAt = Date.now();
+    const traceId = this.readTraceId(request);
+    let capturedError: unknown;
 
     return next.handle().pipe(
       catchError((error: unknown) => {
