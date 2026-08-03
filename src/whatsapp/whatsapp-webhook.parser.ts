@@ -1,5 +1,6 @@
 import type {
   WhatsAppAudioMessage,
+  WhatsAppTextMessage,
   WhatsAppWebhookPayload,
 } from './whatsapp-webhook.types';
 
@@ -18,6 +19,7 @@ export interface UnknownWhatsAppWebhookEvent {
 export interface ClassifiedWhatsAppWebhook {
   audioMessages: WhatsAppAudioMessage[];
   deliveryStatuses: WhatsAppDeliveryStatus[];
+  textMessages: WhatsAppTextMessage[];
   unknownEvents: UnknownWhatsAppWebhookEvent[];
 }
 
@@ -32,6 +34,7 @@ export function classifyWhatsAppWebhook(
   const classified: ClassifiedWhatsAppWebhook = {
     audioMessages: [],
     deliveryStatuses: [],
+    textMessages: [],
     unknownEvents: [],
   };
 
@@ -54,6 +57,26 @@ export function classifyWhatsAppWebhook(
       const phoneNumberId = change.value?.metadata?.phone_number_id;
 
       for (const message of change.value?.messages ?? []) {
+        if (
+          message.type === 'text' &&
+          message.text?.body?.trim() &&
+          message.from &&
+          message.id &&
+          phoneNumberId
+        ) {
+          classified.textMessages.push({
+            body: message.text.body.trim(),
+            ...(message.context?.id
+              ? { contextMessageId: message.context.id }
+              : {}),
+            from: message.from,
+            id: message.id,
+            phoneNumberId,
+            timestamp: message.timestamp,
+          });
+          continue;
+        }
+
         if (
           message.type !== 'audio' ||
           !message.audio?.id ||

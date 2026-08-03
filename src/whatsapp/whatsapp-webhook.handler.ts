@@ -5,9 +5,14 @@ import {
   VoiceBriefingProcessor,
   type VoiceBriefingTelemetry,
 } from './voice-briefing.processor';
+import {
+  BriefingClarificationProcessor,
+  type BriefingClarificationTelemetry,
+} from './briefing-clarification.processor';
 import { classifyWhatsAppWebhook } from './whatsapp-webhook.parser';
 import type {
   WhatsAppAudioMessage,
+  WhatsAppTextMessage,
   WhatsAppWebhookPayload,
 } from './whatsapp-webhook.types';
 
@@ -20,18 +25,19 @@ export class WhatsAppWebhookHandler {
 
   constructor(
     private readonly voiceBriefingProcessor: VoiceBriefingProcessor,
+    private readonly briefingClarificationProcessor: BriefingClarificationProcessor,
     private readonly canonicalLogger: CanonicalLogger,
   ) {}
 
   /**
-   * Dispatches complete audio messages without delaying Meta's webhook
-   * acknowledgement. Successful deliveries are retained briefly to suppress
-   * webhook retries; failed attempts remain eligible for reprocessing.
+   * Dispatches complete voice notes and clarification replies without delaying
+   * Meta's webhook acknowledgement. Successful deliveries are retained briefly
+   * to suppress webhook retries; failed attempts remain eligible for reprocessing.
    */
   handle(payload: WhatsAppWebhookPayload, requestId?: string): void {
     this.removeExpiredProcessedMessageIds();
 
-    const { audioMessages, deliveryStatuses, unknownEvents } =
+    const { audioMessages, deliveryStatuses, textMessages, unknownEvents } =
       classifyWhatsAppWebhook(payload);
 
     for (const deliveryStatus of deliveryStatuses) {
@@ -75,6 +81,14 @@ export class WhatsAppWebhookHandler {
       }
 
       this.startProcessing(message, requestId);
+    }
+
+    for (const message of textMessages) {
+      if (this.isDuplicate(message.id)) {
+        continue;
+      }
+
+      this.startClarificationProcessing(message, requestId);
     }
   }
 
@@ -133,6 +147,54 @@ export class WhatsAppWebhookHandler {
           outcome: 'error',
           ...(requestId ? { request_id: requestId } : {}),
           stages: telemetry,
+          timestamp: new Date(startedAt).toISOString(),
+        });
+      })
+      .finally(() => {
+        this.processingMessageIds.delete(message.id);
+      });
+  }
+
+  private startClarificationProcessing(
+    message: WhatsAppTextMessage,
+    requestId?: string,
+  ): void {
+    const startedAt = Date.now();
+    const telemetry: BriefingClarificationTelemetry = {};
+
+    this.processingMessageIds.add(message.id);
+    void this.briefingClarificationProcessor
+      .process(message, telemetry)
+      .then(() => {
+        this.processedMessageExpirations.set(
+          message.id,
+          Date.now() + PROCESSED_MESSAGE_RETENTION_MS,
+        );
+        this.canonicalLogger.emit({
+          clarification: telemetry,
+          duration_ms: Date.now() - startedAt,
+          event: 'whatsapp.briefing_clarification',
+          message: {
+            inbound_message_id: message.id,
+            provider_timestamp: message.timestamp,
+          },
+          outcome: telemetry.outcome === 'ignored' ? 'ignored' : 'success',
+          ...(requestId ? { request_id: requestId } : {}),
+          timestamp: new Date(startedAt).toISOString(),
+        });
+      })
+      .catch((error: unknown) => {
+        this.canonicalLogger.emit({
+          clarification: telemetry,
+          duration_ms: Date.now() - startedAt,
+          error: describeError(error),
+          event: 'whatsapp.briefing_clarification',
+          message: {
+            inbound_message_id: message.id,
+            provider_timestamp: message.timestamp,
+          },
+          outcome: 'error',
+          ...(requestId ? { request_id: requestId } : {}),
           timestamp: new Date(startedAt).toISOString(),
         });
       })

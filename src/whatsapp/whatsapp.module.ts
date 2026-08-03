@@ -4,6 +4,7 @@ import { AudioModule } from '../audio/audio.module';
 import { BriefingModule } from '../briefing/briefing.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { BriefingDeliveryScheduler } from './briefing-delivery.scheduler';
+import { BriefingClarificationProcessor } from './briefing-clarification.processor';
 import { VoiceBriefingProcessor } from './voice-briefing.processor';
 import { whatsappConfig } from './whatsapp.config';
 import { WhatsAppController } from './whatsapp.controller';
@@ -21,6 +22,7 @@ import { WhatsAppService } from './whatsapp.service';
   controllers: [WhatsAppController],
   providers: [
     WhatsAppService,
+    BriefingClarificationProcessor,
     BriefingDeliveryScheduler,
     WhatsAppWebhookAuthenticator,
     WhatsAppWebhookHandler,

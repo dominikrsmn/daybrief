@@ -9,7 +9,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { Briefing } from '../briefing/briefing.schema';
+import type { PersistedBriefing } from '../briefing/briefing.schema';
 
 export const scheduledBriefingStatuses = [
   'pending',
@@ -28,7 +28,7 @@ export const scheduledBriefings = pgTable(
     inboundMessageId: text('inbound_message_id').notNull().unique(),
     recipient: text('recipient').notNull(),
     phoneNumberId: text('phone_number_id').notNull(),
-    briefing: jsonb('briefing').$type<Briefing>().notNull(),
+    briefing: jsonb('briefing').$type<PersistedBriefing>().notNull(),
     scheduledAt: timestamp('scheduled_at', {
       mode: 'string',
       withTimezone: true,

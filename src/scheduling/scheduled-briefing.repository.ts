@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, sql } from 'drizzle-orm';
-import type { Briefing } from '../briefing/briefing.schema';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import type { Briefing, PersistedBriefing } from '../briefing/briefing.schema';
 import {
   scheduledBriefings,
   type ScheduledBriefingRecord,
@@ -13,6 +13,7 @@ export interface ScheduleBriefingInput {
   phoneNumberId: string;
   recipient: string;
   scheduledAt: string;
+  transcript: string;
 }
 
 @Injectable()
@@ -24,7 +25,13 @@ export class ScheduledBriefingRepository {
   ): Promise<ScheduledBriefingRecord> {
     const [created] = await this.database.db
       .insert(scheduledBriefings)
-      .values(input)
+      .values({
+        briefing: withClarificationState(input.briefing, input.transcript),
+        inboundMessageId: input.inboundMessageId,
+        phoneNumberId: input.phoneNumberId,
+        recipient: input.recipient,
+        scheduledAt: input.scheduledAt,
+      })
       .onConflictDoNothing({ target: scheduledBriefings.inboundMessageId })
       .returning();
 
@@ -43,6 +50,84 @@ export class ScheduledBriefingRepository {
     }
 
     return existing;
+  }
+
+  async findPendingClarification(input: {
+    contextMessageId?: string;
+    phoneNumberId: string;
+    recipient: string;
+  }): Promise<ScheduledBriefingRecord | null> {
+    const candidates = await this.database.db
+      .select()
+      .from(scheduledBriefings)
+      .where(
+        and(
+          eq(scheduledBriefings.status, 'pending'),
+          eq(scheduledBriefings.recipient, input.recipient),
+          eq(scheduledBriefings.phoneNumberId, input.phoneNumberId),
+        ),
+      )
+      .orderBy(desc(scheduledBriefings.createdAt))
+      .limit(10);
+
+    return (
+      candidates.find(({ briefing }) => {
+        if (!briefing.clarification || briefing.openQuestions.length === 0) {
+          return false;
+        }
+
+        return input.contextMessageId
+          ? briefing.clarification.questionMessageId === undefined ||
+              briefing.clarification.questionMessageId ===
+                input.contextMessageId
+          : true;
+      }) ?? null
+    );
+  }
+
+  async updatePendingBriefing(
+    id: string,
+    briefing: Briefing,
+    transcript: string,
+  ): Promise<ScheduledBriefingRecord | null> {
+    const [updated] = await this.database.db
+      .update(scheduledBriefings)
+      .set({
+        briefing: withClarificationState(briefing, transcript),
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(scheduledBriefings.id, id),
+          eq(scheduledBriefings.status, 'pending'),
+        ),
+      )
+      .returning();
+
+    return updated ?? null;
+  }
+
+  async recordClarificationQuestion(
+    id: string,
+    questionMessageId: string,
+  ): Promise<void> {
+    await this.database.db
+      .update(scheduledBriefings)
+      .set({
+        briefing: sql<PersistedBriefing>`jsonb_set(
+          ${scheduledBriefings.briefing},
+          '{clarification,questionMessageId}',
+          to_jsonb(${questionMessageId}::text),
+          true
+        )`,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(scheduledBriefings.id, id),
+          eq(scheduledBriefings.status, 'pending'),
+        ),
+      );
   }
 
   async claimNextDue(): Promise<ScheduledBriefingRecord | null> {
@@ -64,10 +149,14 @@ export class ScheduledBriefingRepository {
         return null;
       }
 
+      const deliveryBriefing = { ...candidate.briefing };
+      delete deliveryBriefing.clarification;
+
       const [claimed] = await transaction
         .update(scheduledBriefings)
         .set({
           attemptCount: sql`${scheduledBriefings.attemptCount} + 1`,
+          briefing: deliveryBriefing,
           lastAttemptAt: sql`now()`,
           status: 'processing',
           updatedAt: sql`now()`,
@@ -107,4 +196,16 @@ export class ScheduledBriefingRepository {
       })
       .where(eq(scheduledBriefings.id, id));
   }
+}
+
+function withClarificationState(
+  briefing: Briefing,
+  transcript: string,
+): PersistedBriefing {
+  return {
+    ...briefing,
+    ...(briefing.openQuestions.length > 0
+      ? { clarification: { transcript } }
+      : {}),
+  };
 }

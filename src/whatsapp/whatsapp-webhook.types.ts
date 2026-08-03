@@ -11,6 +11,12 @@ export interface WhatsAppAudioMessage extends WhatsAppMessageReference {
   voice: boolean;
 }
 
+export interface WhatsAppTextMessage extends WhatsAppMessageReference {
+  body: string;
+  contextMessageId?: string;
+  timestamp?: string;
+}
+
 interface WhatsAppWebhookAudio {
   id?: string;
   mime_type?: string;
@@ -19,9 +25,15 @@ interface WhatsAppWebhookAudio {
 
 interface WhatsAppWebhookMessage {
   audio?: WhatsAppWebhookAudio;
+  context?: {
+    id?: string;
+  };
   from?: string;
   id?: string;
   timestamp?: string;
+  text?: {
+    body?: string;
+  };
   type?: string;
 }
 

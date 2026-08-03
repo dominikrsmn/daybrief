@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { AudioService } from '../audio/audio.service';
+import { renderWhatsAppUncertaintyMessage } from '../briefing/briefing.renderer';
 import { BriefingService } from '../briefing/briefing.service';
 import { briefingScheduleConfig } from '../scheduling/briefing-schedule.config';
 import { resolveBriefingSchedule } from '../scheduling/briefing-schedule';
@@ -10,11 +11,13 @@ import {
   WhatsAppService,
   type WhatsAppDownloadTelemetry,
   type WhatsAppMessageActionTelemetry,
+  type WhatsAppReplyTelemetry,
 } from './whatsapp.service';
 
 const PROCESSING_REACTION = '🔄';
 const COMPLETED_REACTION = '👍';
 const FAILED_REACTION = '❌';
+const UNCERTAINTY_REACTION = '❓';
 
 export interface VoiceBriefingTelemetry {
   audio?: {
@@ -44,8 +47,12 @@ export interface VoiceBriefingTelemetry {
     failed_reaction: WhatsAppMessageActionTelemetry;
     processing_reaction: WhatsAppMessageActionTelemetry;
     read_receipt: WhatsAppMessageActionTelemetry;
+    uncertainty_reaction: WhatsAppMessageActionTelemetry;
   };
   whatsapp_download?: WhatsAppDownloadTelemetry;
+  uncertainty_reply?: WhatsAppReplyTelemetry & {
+    outbound_message_id?: string;
+  };
 }
 
 @Injectable()
@@ -68,6 +75,7 @@ export class VoiceBriefingProcessor {
       failed_reaction: {},
       processing_reaction: {},
       read_receipt: {},
+      uncertainty_reaction: {},
     } satisfies NonNullable<VoiceBriefingTelemetry['whatsapp_actions']>;
     telemetry.whatsapp_actions = actionTelemetry;
 
@@ -160,21 +168,50 @@ export class VoiceBriefingProcessor {
       phoneNumberId: message.phoneNumberId,
       recipient: message.from,
       scheduledAt: schedule.scheduledAt,
+      transcript: transcription,
     });
     telemetry.scheduling = {
       duration_ms: Date.now() - stageStartedAt,
       source: schedule.source,
     };
 
-    await this.performBestEffortMessageAction(
-      () =>
-        this.whatsAppService.react(
-          message,
-          COMPLETED_REACTION,
-          actionTelemetry.completed_reaction,
-        ),
-      actionTelemetry.completed_reaction,
-    );
+    const uncertaintyMessage = renderWhatsAppUncertaintyMessage(briefing);
+
+    if (uncertaintyMessage) {
+      const replyTelemetry: WhatsAppReplyTelemetry & {
+        outbound_message_id?: string;
+      } = {};
+      telemetry.uncertainty_reply = replyTelemetry;
+      const outboundMessageId = await this.whatsAppService.reply(
+        message,
+        uncertaintyMessage,
+        replyTelemetry,
+      );
+      replyTelemetry.outbound_message_id = outboundMessageId;
+      await this.scheduledBriefings.recordClarificationQuestion(
+        scheduledBriefing.id,
+        outboundMessageId,
+      );
+      await this.performBestEffortMessageAction(
+        () =>
+          this.whatsAppService.react(
+            message,
+            UNCERTAINTY_REACTION,
+            actionTelemetry.uncertainty_reaction,
+          ),
+        actionTelemetry.uncertainty_reaction,
+      );
+    } else {
+      await this.performBestEffortMessageAction(
+        () =>
+          this.whatsAppService.react(
+            message,
+            COMPLETED_REACTION,
+            actionTelemetry.completed_reaction,
+          ),
+        actionTelemetry.completed_reaction,
+      );
+    }
 
     return {
       briefingId: scheduledBriefing.id,

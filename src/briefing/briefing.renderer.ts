@@ -74,16 +74,24 @@ export function renderWhatsAppBriefingMessages(
       reminder.timing ? `${reminder.text} (${reminder.timing})` : reminder.text,
     ),
     renderSection(copy.goodToKnow, briefing.context, (item) => item),
-    renderSection(
-      copy.worthClarifying,
-      briefing.openQuestions,
-      (item) => `${item.question}: ${item.impact}`,
-    ),
   ].filter((section): section is string => section !== null);
 
   return [`*${copy.title}*\n${copy.greeting}`, ...sections].map((message) =>
     truncateMessage(message, copy.truncationNotice),
   );
+}
+
+export function renderWhatsAppUncertaintyMessage(
+  briefing: Briefing,
+): string | null {
+  const copy: RendererCopy = COPY[briefing.language];
+  const section = renderSection(
+    copy.worthClarifying,
+    briefing.openQuestions,
+    (item) => `${item.question}\n_${item.impact}_`,
+  );
+
+  return section ? truncateMessage(section, copy.truncationNotice) : null;
 }
 
 function truncateMessage(message: string, notice: string): string {

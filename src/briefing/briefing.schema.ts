@@ -105,8 +105,17 @@ export const BriefingSchema = z.object({
     ),
   openQuestions: z
     .array(OpenQuestionSchema)
-    .max(10)
-    .describe('Material ambiguities whose answers would change the plan.'),
+    .max(3)
+    .describe(
+      'Strictly necessary clarifications whose answers materially change the plan.',
+    ),
 });
 
 export type Briefing = z.infer<typeof BriefingSchema>;
+
+export type PersistedBriefing = Briefing & {
+  clarification?: {
+    questionMessageId?: string;
+    transcript: string;
+  };
+};

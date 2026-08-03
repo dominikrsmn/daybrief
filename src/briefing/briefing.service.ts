@@ -70,9 +70,14 @@ detail must add information beyond its item title and timing. Keep commitments,
 tasks, reminders, and contextual facts distinct and do not repeat or paraphrase
 the same fact within or across sections.
 
-Put only material ambiguities whose answers change the plan in openQuestions, and
-state their impact. Do not treat absent optional information as a question. Set
-wakeupTime to the user's stated wake-up time for the briefing day, normalized to
+Use openQuestions sparingly. Add a question only when the transcript contains a
+real ambiguity or contradiction and no conservative interpretation can produce
+a faithful, useful plan. Its answer must materially change an item's inclusion,
+time, deadline, priority, dependency, or concrete action. Never ask for optional
+detail, confirmation, preferences, extra context, or information that can safely
+remain unspecified. Do not ask merely because a task is vague; retain the user's
+wording instead. If in doubt, do not add a question. State the concrete planning
+impact for every question. Set wakeupTime to the user's stated wake-up time for the briefing day, normalized to
 24-hour HH:mm notation (for example, 06:30 or 18:30), or null when none was
 given. Resolve ordinary language such as "half past six" or German "halb sieben"
 when its meaning is clear from the transcript. Use empty arrays for every

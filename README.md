@@ -153,8 +153,13 @@ the app acknowledges Meta immediately, then downloads the audio, transcribes it,
 creates and persists the morning briefing. A PostgreSQL-backed scheduler polls
 every 30 seconds and sends the briefing at the user's stated wake-up time on the
 next local calendar day, or at `DEFAULT_BRIEFING_TIME` when no wake-up time was
-given. `DEFAULT_BRIEFING_TIME_ZONE` must be an IANA time zone and is used for all
-users until per-user time zones are introduced. The delivery contains an
+given. When a transcript contains a genuinely plan-changing ambiguity, the app
+sends a separate clarification section immediately and reacts to the voice note
+with `❓`. A text answer is appended to the source transcript and the pending
+briefing is regenerated; unanswered clarifications expire when delivery begins.
+The scheduled briefing never contains the clarification section.
+`DEFAULT_BRIEFING_TIME_ZONE` must be an IANA time zone and is used for all users
+until per-user time zones are introduced. The delivery contains an
 introductory title and one message per non-empty briefing section. English and German recordings are
 rendered in their dominant language; mixed-language recordings use the dominant
 language, with English as the fallback when it cannot be determined. Tasks and
