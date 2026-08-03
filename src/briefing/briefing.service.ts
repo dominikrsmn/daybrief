@@ -18,7 +18,13 @@ Set language to the transcript's dominant language: en for English or de for
 German. If the transcript mixes both languages, use the dominant language; if it
 is genuinely unclear, use en. Write all generated free-text fields consistently
 in that language while preserving proper names, locations, and the user's wording
-for stated times and deadlines.
+for stated times and deadlines, except for the compact normalization below.
+
+Keep timing fields short for a narrow WhatsApp layout. Format commitment times in
+24-hour H:mm notation and ranges as "8:00 - 14:00". Express task deadlines in one
+or two short words, retaining relative context when it matters, for example
+"Wednesday" or "Wednesday, next week". Do not add explanatory phrases such as
+"between", "o'clock", "due", or "deadline" to these fields.
 
 Identify and distinguish:
 - Fixed commitments, such as work hours, appointments, meetings, and other events
@@ -28,7 +34,7 @@ Identify and distinguish:
 Classify flexible tasks as critical only when delay has an immediate serious
 consequence, high when the transcript supports urgency, an important consequence,
 or a blocking dependency, and normal otherwise. Give a priorityReason only for
-critical or high items. Preserve the user's wording for stated times and deadlines.
+critical or high items.
 
 Never invent a deadline, meeting, duration, exact time, location, dependency,
 consequence, or personal detail. A nextStep may be included only when stated or

@@ -6,7 +6,7 @@ const OptionalTimingSchema = z.string().min(1).max(80).nullable();
 export const CommitmentSchema = z.object({
   title: z.string().min(1).max(160),
   time: OptionalTimingSchema.describe(
-    'The user-stated time or time range, preserving their wording, or null.',
+    'The user-stated time or time range in compact 24-hour H:mm format (for example, 8:00 or 8:00 - 14:00), or null.',
   ),
   location: z.string().min(1).max(120).nullable(),
   context: OptionalDetailSchema.describe(
@@ -17,7 +17,7 @@ export const CommitmentSchema = z.object({
 export const TaskSchema = z.object({
   title: z.string().min(1).max(160),
   deadline: OptionalTimingSchema.describe(
-    'The user-stated deadline, preserving their wording, or null.',
+    'The user-stated deadline as one or two compact words (for example, Wednesday or Wednesday, next week), or null.',
   ),
   priority: z
     .enum(['critical', 'high', 'normal'])
