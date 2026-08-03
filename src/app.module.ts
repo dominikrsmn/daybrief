@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AudioModule } from './audio/audio.module';
 import { openAIConfig } from './openai/openai.config';
 import { OpenAIModule } from './openai/openai.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       load: [openAIConfig],
     }),
     OpenAIModule,
+    ObservabilityModule,
     AudioModule,
     WhatsAppModule,
   ],

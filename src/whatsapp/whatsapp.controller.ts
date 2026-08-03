@@ -53,6 +53,7 @@ export class WhatsAppController {
   receiveWebhook(
     @Req() request: RawBodyRequest<Request>,
     @Headers('x-hub-signature-256') signature: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
     @Body() payload: WhatsAppWebhookPayload,
   ): { received: true } {
     if (!this.whatsappService.isWebhookSignatureConfigured()) {
@@ -65,7 +66,7 @@ export class WhatsAppController {
       throw new UnauthorizedException('Invalid webhook signature.');
     }
 
-    this.webhookHandler.handle(payload);
+    this.webhookHandler.handle(payload, requestId);
 
     return { received: true };
   }

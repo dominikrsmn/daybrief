@@ -128,11 +128,31 @@ the app acknowledges Meta immediately, then downloads the audio, transcribes it,
 creates the morning briefing, and replies to the original WhatsApp message with
 the briefing text. English and German recordings are rendered in their dominant
 language; mixed-language recordings use the dominant language, with English as
-the fallback when it cannot be determined. Structured log events record each
-stage without logging the audio, transcript, or briefing contents. Duplicate
+the fallback when it cannot be determined. One structured canonical event
+records the completed workflow and its stage metrics without logging the audio,
+transcript, briefing, or reply contents. Duplicate
 webhook deliveries are suppressed in memory while processing and for 24 hours
 after successful processing. Failed attempts are not retained in the duplicate
 cache.
+
+### Observability
+
+Logs are newline-delimited JSON. Each HTTP request emits one canonical event;
+each asynchronous voice-briefing workflow emits a separate event correlated by
+`request_id` and provider message IDs. Error, ignored, and slow events are always
+kept. Successful events are tail-sampled at 5% in production and kept in full in
+other environments.
+
+The sampling policy can be configured with:
+
+```bash
+LOG_SUCCESS_SAMPLE_RATE=0.05
+LOG_SLOW_EVENT_THRESHOLD_MS=2000
+```
+
+Set `LOG_SUCCESS_SAMPLE_RATE=1` temporarily when investigating a rollout. Never
+add raw audio, transcripts, message bodies, phone numbers, authorization headers,
+tokens, or webhook signatures to canonical events.
 
 You can verify the callback challenge after deployment:
 

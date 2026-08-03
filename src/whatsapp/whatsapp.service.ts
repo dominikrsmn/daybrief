@@ -3,7 +3,6 @@ import {
   BadRequestException,
   Inject,
   Injectable,
-  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
@@ -20,20 +19,6 @@ import type {
 
 interface WhatsAppSendMessageResponse {
   messages?: Array<{ id?: string }>;
-}
-
-interface WhatsAppApiErrorResponse {
-  error?: {
-    code?: number;
-    error_data?: {
-      details?: string;
-      messaging_product?: string;
-    };
-    error_subcode?: number;
-    fbtrace_id?: string;
-    message?: string;
-    type?: string;
-  };
 }
 
 interface WhatsAppMediaMetadataResponse {
@@ -59,22 +44,26 @@ const AUDIO_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
 const WHATSAPP_FETCH_MAX_ATTEMPTS = 3;
 const WHATSAPP_FETCH_RETRY_BASE_DELAY_MS = 250;
 const WHATSAPP_FETCH_RETRY_MAX_DELAY_MS = 5_000;
-const RETRYABLE_HTTP_STATUSES = new Set([
-  408, 425, 429, 500, 502, 503, 504,
-]);
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-interface NetworkErrorDetails {
-  address?: string;
-  code?: string;
-  message?: string;
-  port?: number;
-  syscall?: string;
+interface WhatsAppFetchTelemetry {
+  attempts?: number;
+  last_network_error_code?: string;
+  last_status_code?: number;
+  retry_delay_ms?: number;
+}
+
+export interface WhatsAppDownloadTelemetry {
+  content?: WhatsAppFetchTelemetry;
+  metadata?: WhatsAppFetchTelemetry;
+}
+
+export interface WhatsAppReplyTelemetry {
+  status_code?: number;
 }
 
 @Injectable()
 export class WhatsAppService {
-  private readonly logger = new Logger(WhatsAppService.name);
-
   constructor(
     @Inject(whatsappConfig.KEY)
     private readonly config: ConfigType<typeof whatsappConfig>,
@@ -124,6 +113,7 @@ export class WhatsAppService {
    */
   async downloadAudio(
     message: WhatsAppAudioMessage,
+    telemetry: WhatsAppDownloadTelemetry = {},
   ): Promise<UploadedAudioFile> {
     this.assertCloudApiConfigured();
 
@@ -134,7 +124,7 @@ export class WhatsAppService {
     const metadataResponse = await this.fetchFromWhatsApp(
       metadataEndpoint,
       'metadata',
-      message,
+      telemetry,
     );
     const metadata =
       await this.parseJsonResponse<WhatsAppMediaMetadataResponse>(
@@ -161,7 +151,7 @@ export class WhatsAppService {
     const mediaResponse = await this.fetchFromWhatsApp(
       mediaUrl,
       'content',
-      message,
+      telemetry,
     );
     const buffer = await this.readBoundedMediaBody(mediaResponse);
 
@@ -175,16 +165,6 @@ export class WhatsAppService {
     const baseMimeType = mimeType.split(';', 1)[0].trim().toLowerCase();
     const extension = AUDIO_FILE_EXTENSIONS[baseMimeType] ?? 'audio';
     const safeMediaId = message.mediaId.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'whatsapp.audio.downloaded',
-        mediaId: message.mediaId,
-        messageId: message.id,
-        mimeType,
-        size: buffer.length,
-      }),
-    );
 
     return {
       buffer,
@@ -204,6 +184,7 @@ export class WhatsAppService {
   async reply(
     message: WhatsAppMessageReference,
     body: string,
+    telemetry: WhatsAppReplyTelemetry = {},
   ): Promise<string> {
     const normalizedBody = body.trim();
 
@@ -245,28 +226,14 @@ export class WhatsAppService {
           },
         }),
       });
-    } catch (error) {
-      this.logger.error(
-        JSON.stringify({
-          event: 'whatsapp.reply.failed',
-          messageId: message.id,
-          reason: error instanceof Error ? error.message : 'request_failed',
-        }),
-      );
+    } catch {
       throw new BadGatewayException('WhatsApp could not be reached.');
     }
 
-    if (!response.ok) {
-      const providerError = await this.parseWhatsAppApiError(response);
+    telemetry.status_code = response.status;
 
-      this.logger.error(
-        JSON.stringify({
-          event: 'whatsapp.reply.rejected',
-          messageId: message.id,
-          providerError,
-          status: response.status,
-        }),
-      );
+    if (!response.ok) {
+      await this.discardResponseBody(response);
       throw new BadGatewayException('WhatsApp rejected the reply.');
     }
 
@@ -286,14 +253,6 @@ export class WhatsAppService {
         'WhatsApp did not return an outbound message ID.',
       );
     }
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'whatsapp.reply.sent',
-        inboundMessageId: message.id,
-        outboundMessageId: replyMessageId,
-      }),
-    );
 
     return replyMessageId;
   }
@@ -319,43 +278,34 @@ export class WhatsAppService {
   private async fetchFromWhatsApp(
     url: URL,
     resource: 'content' | 'metadata',
-    message: WhatsAppAudioMessage,
+    downloadTelemetry: WhatsAppDownloadTelemetry,
   ): Promise<Response> {
+    const telemetry = (downloadTelemetry[resource] ??= {});
+
     // Media retrieval is GET-only, so transient retries cannot duplicate a
     // provider-side mutation. Permanent client errors still fail immediately.
     for (let attempt = 1; attempt <= WHATSAPP_FETCH_MAX_ATTEMPTS; attempt++) {
       let response: Response;
+      telemetry.attempts = attempt;
 
       try {
         response = await fetch(url, {
           headers: { Authorization: `Bearer ${this.config.accessToken}` },
         });
       } catch (error) {
+        telemetry.last_network_error_code = this.getNetworkErrorCode(error);
+
         if (attempt < WHATSAPP_FETCH_MAX_ATTEMPTS) {
           const delayMs = this.calculateRetryDelay(attempt);
-          this.logDownloadRetry(message, resource, attempt, delayMs, {
-            networkError: this.getNetworkErrorDetails(error),
-            reason:
-              error instanceof Error ? error.message : 'request_failed',
-          });
+          telemetry.retry_delay_ms = (telemetry.retry_delay_ms ?? 0) + delayMs;
           await this.delay(delayMs);
           continue;
         }
 
-        this.logger.error(
-          JSON.stringify({
-            event: 'whatsapp.audio.download_failed',
-            attempt,
-            mediaId: message.mediaId,
-            messageId: message.id,
-            networkError: this.getNetworkErrorDetails(error),
-            reason:
-              error instanceof Error ? error.message : 'request_failed',
-            resource,
-          }),
-        );
         throw new BadGatewayException('WhatsApp media could not be reached.');
       }
+
+      telemetry.last_status_code = response.status;
 
       if (response.ok) {
         return response;
@@ -370,23 +320,11 @@ export class WhatsAppService {
           response.headers.get('retry-after'),
         );
         await this.discardResponseBody(response);
-        this.logDownloadRetry(message, resource, attempt, delayMs, {
-          status: response.status,
-        });
+        telemetry.retry_delay_ms = (telemetry.retry_delay_ms ?? 0) + delayMs;
         await this.delay(delayMs);
         continue;
       }
 
-      this.logger.error(
-        JSON.stringify({
-          event: 'whatsapp.audio.download_rejected',
-          attempt,
-          mediaId: message.mediaId,
-          messageId: message.id,
-          resource,
-          status: response.status,
-        }),
-      );
       throw new BadGatewayException('WhatsApp rejected the media download.');
     }
 
@@ -434,34 +372,7 @@ export class WhatsAppService {
     }
   }
 
-  private logDownloadRetry(
-    message: WhatsAppAudioMessage,
-    resource: 'content' | 'metadata',
-    failedAttempt: number,
-    delayMs: number,
-    details: {
-      networkError?: NetworkErrorDetails;
-      reason?: string;
-      status?: number;
-    },
-  ): void {
-    this.logger.warn(
-      JSON.stringify({
-        event: 'whatsapp.audio.download_retry_scheduled',
-        attempt: failedAttempt,
-        delayMs,
-        ...details,
-        mediaId: message.mediaId,
-        messageId: message.id,
-        nextAttempt: failedAttempt + 1,
-        resource,
-      }),
-    );
-  }
-
-  private getNetworkErrorDetails(
-    error: unknown,
-  ): NetworkErrorDetails | undefined {
+  private getNetworkErrorCode(error: unknown): string | undefined {
     if (
       !(error instanceof Error) ||
       !error.cause ||
@@ -471,13 +382,7 @@ export class WhatsAppService {
     }
 
     const cause = error.cause as Record<string, unknown>;
-    return {
-      address: typeof cause.address === 'string' ? cause.address : undefined,
-      code: typeof cause.code === 'string' ? cause.code : undefined,
-      message: typeof cause.message === 'string' ? cause.message : undefined,
-      port: typeof cause.port === 'number' ? cause.port : undefined,
-      syscall: typeof cause.syscall === 'string' ? cause.syscall : undefined,
-    };
+    return typeof cause.code === 'string' ? cause.code : undefined;
   }
 
   private delay(milliseconds: number): Promise<void> {
@@ -492,16 +397,6 @@ export class WhatsAppService {
       return (await response.json()) as T;
     } catch {
       throw new BadGatewayException(errorMessage);
-    }
-  }
-
-  private async parseWhatsAppApiError(
-    response: Response,
-  ): Promise<WhatsAppApiErrorResponse | { unavailable: true }> {
-    try {
-      return (await response.json()) as WhatsAppApiErrorResponse;
-    } catch {
-      return { unavailable: true };
     }
   }
 

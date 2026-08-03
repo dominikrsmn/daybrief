@@ -1,5 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { VoiceBriefingProcessor } from './voice-briefing.processor';
+import { Injectable } from '@nestjs/common';
+import { describeError } from '../observability/canonical-event';
+import { CanonicalLogger } from '../observability/canonical-logger.service';
+import {
+  VoiceBriefingProcessor,
+  type VoiceBriefingTelemetry,
+} from './voice-briefing.processor';
 import { classifyWhatsAppWebhook } from './whatsapp-webhook.parser';
 import type {
   WhatsAppAudioMessage,
@@ -10,12 +15,12 @@ const PROCESSED_MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 @Injectable()
 export class WhatsAppWebhookHandler {
-  private readonly logger = new Logger(WhatsAppWebhookHandler.name);
   private readonly processingMessageIds = new Set<string>();
   private readonly processedMessageExpirations = new Map<string, number>();
 
   constructor(
     private readonly voiceBriefingProcessor: VoiceBriefingProcessor,
+    private readonly canonicalLogger: CanonicalLogger,
   ) {}
 
   /**
@@ -23,43 +28,53 @@ export class WhatsAppWebhookHandler {
    * acknowledgement. Successful deliveries are retained briefly to suppress
    * webhook retries; failed attempts remain eligible for reprocessing.
    */
-  handle(payload: WhatsAppWebhookPayload): void {
+  handle(payload: WhatsAppWebhookPayload, requestId?: string): void {
     this.removeExpiredProcessedMessageIds();
 
     const { audioMessages, deliveryStatuses, unknownEvents } =
       classifyWhatsAppWebhook(payload);
 
     for (const deliveryStatus of deliveryStatuses) {
-      this.logger.log(
-        JSON.stringify({
-          event: `whatsapp.message.${deliveryStatus.status}`,
-          messageId: deliveryStatus.messageId,
-          timestamp: deliveryStatus.timestamp,
-        }),
-      );
+      this.canonicalLogger.emit({
+        duration_ms: 0,
+        event: 'whatsapp.message.delivery_status',
+        message: {
+          id: deliveryStatus.messageId,
+          provider_timestamp: deliveryStatus.timestamp,
+          status: deliveryStatus.status,
+        },
+        outcome: 'success',
+        ...(requestId ? { request_id: requestId } : {}),
+        timestamp: new Date().toISOString(),
+      });
     }
 
     for (const unknownEvent of unknownEvents) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'whatsapp.webhook.unknown',
-          ...unknownEvent,
-        }),
-      );
+      this.canonicalLogger.emit({
+        duration_ms: 0,
+        event: 'whatsapp.webhook.unsupported',
+        outcome: 'ignored',
+        ...(requestId ? { request_id: requestId } : {}),
+        timestamp: new Date().toISOString(),
+        webhook: unknownEvent,
+      });
     }
 
     for (const message of audioMessages) {
       if (this.isDuplicate(message.id)) {
-        this.logger.log(
-          JSON.stringify({
-            event: 'whatsapp.audio.duplicate_ignored',
-            messageId: message.id,
-          }),
-        );
+        this.canonicalLogger.emit({
+          duration_ms: 0,
+          event: 'whatsapp.voice_briefing',
+          message: { inbound_message_id: message.id },
+          outcome: 'ignored',
+          reason: 'duplicate',
+          ...(requestId ? { request_id: requestId } : {}),
+          timestamp: new Date().toISOString(),
+        });
         continue;
       }
 
-      this.startProcessing(message);
+      this.startProcessing(message, requestId);
     }
   }
 
@@ -70,45 +85,55 @@ export class WhatsAppWebhookHandler {
     );
   }
 
-  private startProcessing(message: WhatsAppAudioMessage): void {
+  private startProcessing(
+    message: WhatsAppAudioMessage,
+    requestId?: string,
+  ): void {
     const startedAt = Date.now();
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'whatsapp.audio.received',
-        mediaId: message.mediaId,
-        messageId: message.id,
-        phoneNumberId: message.phoneNumberId,
-        voice: message.voice,
-      }),
-    );
+    const telemetry: VoiceBriefingTelemetry = {};
 
     this.processingMessageIds.add(message.id);
     void this.voiceBriefingProcessor
-      .process(message)
+      .process(message, telemetry)
       .then((outboundMessageId) => {
         this.processedMessageExpirations.set(
           message.id,
           Date.now() + PROCESSED_MESSAGE_RETENTION_MS,
         );
-        this.logger.log(
-          JSON.stringify({
-            event: 'whatsapp.audio.processing_completed',
-            durationMs: Date.now() - startedAt,
-            inboundMessageId: message.id,
-            outboundMessageId,
-          }),
-        );
+        this.canonicalLogger.emit({
+          duration_ms: Date.now() - startedAt,
+          event: 'whatsapp.voice_briefing',
+          message: {
+            inbound_message_id: message.id,
+            media_id: message.mediaId,
+            outbound_message_id: outboundMessageId,
+            phone_number_id: message.phoneNumberId,
+            provider_timestamp: message.timestamp,
+            voice: message.voice,
+          },
+          outcome: 'success',
+          ...(requestId ? { request_id: requestId } : {}),
+          stages: telemetry,
+          timestamp: new Date(startedAt).toISOString(),
+        });
       })
       .catch((error: unknown) => {
-        this.logger.error(
-          JSON.stringify({
-            event: 'whatsapp.audio.processing_failed',
-            messageId: message.id,
-            reason:
-              error instanceof Error ? error.message : 'processing_failed',
-          }),
-        );
+        this.canonicalLogger.emit({
+          duration_ms: Date.now() - startedAt,
+          error: describeError(error),
+          event: 'whatsapp.voice_briefing',
+          message: {
+            inbound_message_id: message.id,
+            media_id: message.mediaId,
+            phone_number_id: message.phoneNumberId,
+            provider_timestamp: message.timestamp,
+            voice: message.voice,
+          },
+          outcome: 'error',
+          ...(requestId ? { request_id: requestId } : {}),
+          stages: telemetry,
+          timestamp: new Date(startedAt).toISOString(),
+        });
       })
       .finally(() => {
         this.processingMessageIds.delete(message.id);
